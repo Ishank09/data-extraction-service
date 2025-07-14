@@ -7,5 +7,6 @@ type Config struct {
 }
 
 const (
-	PortEnvVar = "PORT"
+	PortEnvVar            = "PORT"
+	EnvironmentNameEnvVar = "ENVIRONMENT_NAME"
 )

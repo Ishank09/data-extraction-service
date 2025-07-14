@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	//nolint:depguard
+	"github.com/ishank09/data-extraction-service/cmd/server"
 
 	"github.com/charmbracelet/log" //nolint:depguard
 	"github.com/ishank09/data-extraction-service/pkg/logging"
