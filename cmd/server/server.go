@@ -11,8 +11,10 @@ import (
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
 	"github.com/ishank09/data-extraction-service/cmd/server/env"
+	"github.com/ishank09/data-extraction-service/pkg/api/v1/dataextractionhandler"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/health"
 	"github.com/ishank09/data-extraction-service/pkg/logging"
+	"github.com/ishank09/data-extraction-service/pkg/msgraph"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/slok/go-http-metrics/metrics/prometheus"
 
@@ -71,11 +73,29 @@ func GetServerCmd() *cobra.Command {
 			}))
 			engine.Use(requestid.New())
 			engine.Use(logging.GetGinRequestLogDecoratorMiddleware())
+
+			// Health endpoint
 			engine.GET(
 				"/ping",
 				health.New().Handler,
 				getMetricsMiddlewareHandler("GET /ping", httpMetricsMiddlewareInstance),
 			)
+
+			// Create data extraction handler
+			handler, err := createDataExtractionHandler(&cfg)
+			if err != nil {
+				log.Errorf("Failed to create data extraction handler: %v", err)
+				return err
+			}
+
+			// Data extraction routes
+			v1 := engine.Group("/api/v1")
+			v1.GET("/documents", handler.GetAllDocuments, getMetricsMiddlewareHandler("GET /api/v1/documents", httpMetricsMiddlewareInstance))
+			v1.GET("/documents/:source", handler.GetDocumentsBySource, getMetricsMiddlewareHandler("GET /api/v1/documents/:source", httpMetricsMiddlewareInstance))
+			v1.GET("/documents/type/:type", handler.GetDocumentsByType, getMetricsMiddlewareHandler("GET /api/v1/documents/type/:type", httpMetricsMiddlewareInstance))
+			v1.GET("/sources", handler.GetSources, getMetricsMiddlewareHandler("GET /api/v1/sources", httpMetricsMiddlewareInstance))
+			v1.GET("/health", handler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/health", httpMetricsMiddlewareInstance))
+
 			// Register "/metrics" endpoint with Gin to expose Prometheus metrics.
 			engine.GET(
 				"/metrics",
@@ -105,6 +125,26 @@ func GetServerCmd() *cobra.Command {
 	}
 }
 
+// createDataExtractionHandler creates a data extraction handler with MSGraph configuration from environment variables
+func createDataExtractionHandler(cfg *Config) (*dataextractionhandler.Handler, error) {
+	// Check if MSGraph configuration is available
+	if cfg.MSGraph.ClientID != "" && cfg.MSGraph.ClientSecret != "" && cfg.MSGraph.TenantID != "" {
+		log.Infof("Creating data extraction handler with MSGraph integration")
+		config := &dataextractionhandler.Config{
+			MSGraphConfig: &msgraph.Config{
+				ClientID:     cfg.MSGraph.ClientID,
+				ClientSecret: cfg.MSGraph.ClientSecret,
+				TenantID:     cfg.MSGraph.TenantID,
+			},
+		}
+		return dataextractionhandler.New(config)
+	}
+
+	// Fallback to static files only
+	log.Infof("Creating data extraction handler with static files only (MSGraph not configured)")
+	return dataextractionhandler.New(nil)
+}
+
 func getMetricsMiddlewareHandler(
 	handlerID string,
 	httpMetricsMiddlewareInstance httpMetricsMiddleware.Middleware,
@@ -120,6 +160,11 @@ func setCmdFlagsFromEnv(command *cobra.Command, cfg *Config) {
 		env.ParseInt(PortEnvVar, defaultPort),
 		"port to run server",
 	)
+
+	// Set MSGraph configuration from environment variables
+	cfg.MSGraph.ClientID = os.Getenv(MSGraphClientIDEnvVar)
+	cfg.MSGraph.ClientSecret = os.Getenv(MSGraphClientSecretEnvVar)
+	cfg.MSGraph.TenantID = os.Getenv(MSGraphTenantIDEnvVar)
 }
 
 func testStatusCodeAlertHandler(c *gin.Context) {

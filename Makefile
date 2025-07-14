@@ -30,6 +30,7 @@ clean:
 	$(GOCLEAN)
 	rm -f $(BINARY_PATH)
 	rm -f coverage.out coverage.html
+	rm -rf mocks/
 
 # Download dependencies
 .PHONY: deps
@@ -46,6 +47,25 @@ lint:
 .PHONY: install-lint
 install-lint:
 	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+
+# Install mockery (if not already installed)
+.PHONY: install-mockery
+install-mockery:
+	@which mockery > /dev/null || (echo "Installing mockery..." && go install github.com/vektra/mockery/v2@latest)
+
+# Generate mocks using mockery
+.PHONY: mocks
+mocks: install-mockery
+	mockery
+
+# Clean generated mocks
+.PHONY: clean-mocks
+clean-mocks:
+	rm -rf mocks/
+
+# Short alias for test
+.PHONY: t
+t: test
 
 # Run all checks (lint, test)
 .PHONY: check
@@ -65,17 +85,21 @@ dev:
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  build         - Build the binary"
-	@echo "  test          - Run tests"
-	@echo "  test-coverage - Run tests with coverage report"
-	@echo "  clean         - Clean build artifacts"
-	@echo "  deps          - Download and tidy dependencies"
-	@echo "  lint          - Run golangci-lint"
-	@echo "  install-lint  - Install golangci-lint if not present"
-	@echo "  check         - Run lint and test"
-	@echo "  run           - Build and run the application"
-	@echo "  dev           - Run development server"
-	@echo "  help          - Show this help message"
+	@echo "  build           - Build the binary"
+	@echo "  test            - Run tests"
+	@echo "  t               - Short alias for test"
+	@echo "  test-coverage   - Run tests with coverage report"
+	@echo "  clean           - Clean build artifacts and mocks"
+	@echo "  deps            - Download and tidy dependencies"
+	@echo "  lint            - Run golangci-lint"
+	@echo "  install-lint    - Install golangci-lint if not present"
+	@echo "  install-mockery - Install mockery if not present"
+	@echo "  mocks           - Generate mocks using mockery"
+	@echo "  clean-mocks     - Clean generated mocks"
+	@echo "  check           - Run lint and test"
+	@echo "  run             - Build and run the application"
+	@echo "  dev             - Run development server"
+	@echo "  help            - Show this help message"
 
 # Default target
 .DEFAULT_GOAL := help 

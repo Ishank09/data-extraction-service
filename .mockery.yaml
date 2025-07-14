@@ -1,0 +1,17 @@
+with-expecter: true
+issue-845-fix: true
+packages:
+  github.com/ishank09/data-extraction-service/pkg/msgraph:
+    interfaces:
+      Interface:
+        config:
+          dir: "mocks/github.com/ishank09/data-extraction-service/pkg/msgraph"
+          mockname: "MockInterface"
+          filename: "mock_Interface.go"
+  github.com/ishank09/data-extraction-service/pkg/static:
+    interfaces:
+      FileProcessor:
+        config:
+          dir: "mocks/github.com/ishank09/data-extraction-service/pkg/static"
+          mockname: "MockFileProcessor"
+          filename: "mock_FileProcessor.go" 
