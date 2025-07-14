@@ -6,7 +6,7 @@ import (
 	//nolint:depguard
 
 	"github.com/charmbracelet/log" //nolint:depguard
-	"github.com/ivasania/data-extraction-service/pkg/logging"
+	"github.com/ishank09/data-extraction-service/pkg/logging"
 	"github.com/spf13/cobra"
 )
 

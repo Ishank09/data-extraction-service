@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ivasania/data-extraction-service/pkg/logging"
+	"github.com/ishank09/data-extraction-service/pkg/logging"
 )
 
 var log = logging.GetLogger()
