@@ -11,6 +11,15 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Debug binaries created by Go debuggers/IDEs
+__debug_bin*
+*.debug
+
+# Output of the go build command
+/data-extraction-service
+/bin/
+/dist/
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -26,10 +35,40 @@ go.work.sum
 
 # env file
 .env
+.env.local
+.env.*.local
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
 
 # Generated mocks
 mocks/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Build artifacts
+*.a
+*.o
+*.obj
+*.lib
+*.pdb

@@ -25,8 +25,8 @@ func TestClient_GetAllDataAsJSON(t *testing.T) {
 		t.Fatal("GetAllDataAsJSON() should not return nil collection")
 	}
 
-	// Should have no documents since all directories are empty
-	expectedDocs := 0
+	// Should have 1 document (Profile.pdf)
+	expectedDocs := 1
 	actualDocs := collection.GetDocumentCount()
 	if actualDocs != expectedDocs {
 		t.Errorf("Expected %d documents, got %d", expectedDocs, actualDocs)
@@ -40,13 +40,13 @@ func TestClient_GetAllDataAsJSON(t *testing.T) {
 		t.Errorf("Expected schema version 'v1', got '%s'", collection.SchemaVersion)
 	}
 
-	// Check that all file types are empty
+	// Check that all file types are empty except PDF
 	fileTypes := make(map[string]int)
 	for _, doc := range collection.Documents {
 		fileTypes[doc.Type]++
 	}
 
-	// All file types should have 0 documents (empty directories)
+	// All file types should have 0 documents except PDF
 	if fileTypes["json"] != 0 {
 		t.Error("Should have 0 JSON documents (empty directory)")
 	}
@@ -56,8 +56,8 @@ func TestClient_GetAllDataAsJSON(t *testing.T) {
 	if fileTypes["txt"] != 0 {
 		t.Error("Should have 0 TXT documents (empty directory)")
 	}
-	if fileTypes["pdf"] != 0 {
-		t.Error("Should have 0 PDF documents (empty directory)")
+	if fileTypes["pdf"] != 1 {
+		t.Errorf("Should have 1 PDF document (Profile.pdf), got %d", fileTypes["pdf"])
 	}
 	if fileTypes["html"] != 0 {
 		t.Error("Should have 0 HTML documents (empty directory)")
@@ -98,13 +98,24 @@ func TestClient_GetFilesByType(t *testing.T) {
 		t.Errorf("Expected 0 TXT documents, got %d", len(txtDocs))
 	}
 
-	// Test PDF files (empty directory)
+	// Test PDF files (contains Profile.pdf)
 	pdfDocs, err := client.GetFilesByType(ctx, "pdf")
 	if err != nil {
 		t.Fatalf("GetFilesByType('pdf') error = %v", err)
 	}
-	if len(pdfDocs) != 0 {
-		t.Errorf("Expected 0 PDF documents, got %d", len(pdfDocs))
+	if len(pdfDocs) != 1 {
+		t.Errorf("Expected 1 PDF document, got %d", len(pdfDocs))
+	}
+
+	// Verify PDF document properties
+	if len(pdfDocs) > 0 {
+		pdfDoc := pdfDocs[0]
+		if pdfDoc.Type != "pdf" {
+			t.Errorf("Expected PDF document type 'pdf', got '%s'", pdfDoc.Type)
+		}
+		if pdfDoc.Title != "Profile.pdf" {
+			t.Errorf("Expected PDF document title 'Profile.pdf', got '%s'", pdfDoc.Title)
+		}
 	}
 }
 
@@ -146,13 +157,20 @@ func TestClient_ListFilesByType(t *testing.T) {
 		t.Errorf("Expected 0 CSV files, got %d", len(csvFiles))
 	}
 
-	// Test PDF files (empty directory)
+	// Test PDF files (contains Profile.pdf)
 	pdfFiles, err := client.ListFilesByType(ctx, "pdf")
 	if err != nil {
 		t.Fatalf("ListFilesByType('pdf') error = %v", err)
 	}
-	if len(pdfFiles) != 0 {
-		t.Errorf("Expected 0 PDF files, got %d", len(pdfFiles))
+	if len(pdfFiles) != 1 {
+		t.Errorf("Expected 1 PDF file, got %d", len(pdfFiles))
+	}
+
+	// Verify PDF filename
+	if len(pdfFiles) > 0 {
+		if pdfFiles[0] != "Profile.pdf" {
+			t.Errorf("Expected PDF filename 'Profile.pdf', got '%s'", pdfFiles[0])
+		}
 	}
 }
 
@@ -172,7 +190,7 @@ func TestClient_ListFilesByType_InvalidType(t *testing.T) {
 	}
 }
 
-func TestClient_DocumentStructure_EmptyDirectories(t *testing.T) {
+func TestClient_DocumentStructure_WithPDFFile(t *testing.T) {
 	client := NewClient()
 	ctx := context.Background()
 
@@ -181,9 +199,26 @@ func TestClient_DocumentStructure_EmptyDirectories(t *testing.T) {
 		t.Fatalf("GetAllDataAsJSON() error = %v", err)
 	}
 
-	// Since all directories are empty, there should be no documents to test
-	if len(collection.Documents) != 0 {
-		t.Errorf("Expected 0 documents from empty directories, got %d", len(collection.Documents))
+	// Should have 1 document (Profile.pdf)
+	if len(collection.Documents) != 1 {
+		t.Errorf("Expected 1 document, got %d", len(collection.Documents))
+	}
+
+	// Verify the PDF document structure
+	if len(collection.Documents) > 0 {
+		doc := collection.Documents[0]
+		if doc.Type != "pdf" {
+			t.Errorf("Expected document type 'pdf', got '%s'", doc.Type)
+		}
+		if doc.Title != "Profile.pdf" {
+			t.Errorf("Expected document title 'Profile.pdf', got '%s'", doc.Title)
+		}
+		if doc.Source != "embedded" {
+			t.Errorf("Expected document source 'embedded', got '%s'", doc.Source)
+		}
+		if doc.Metadata == nil {
+			t.Error("Expected document metadata to not be nil")
+		}
 	}
 }
 

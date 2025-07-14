@@ -97,7 +97,7 @@ func TestHandler_GetAllDocuments(t *testing.T) {
 			name:             "returns documents from static source only",
 			useMSGraphClient: false,
 			expectedStatus:   http.StatusOK,
-			expectedDocCount: 0, // Empty directories
+			expectedDocCount: 1, // 1 PDF document from static
 			expectError:      false,
 		},
 		{
@@ -117,7 +117,7 @@ func TestHandler_GetAllDocuments(t *testing.T) {
 				m.On("GetOneNoteDataAsJSON", mock.Anything).Return(collection, nil)
 			},
 			expectedStatus:   http.StatusOK,
-			expectedDocCount: 1, // 1 from msgraph + 0 from static
+			expectedDocCount: 2, // 1 from msgraph + 1 from static
 			expectError:      false,
 		},
 		{
