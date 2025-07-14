@@ -33,7 +33,7 @@ func GetServerCmd() *cobra.Command {
 	var cfg Config
 
 	return &cobra.Command{
-		Use:     "server",
+		Use:     "serve",
 		Aliases: []string{"s"},
 		Short:   "Run the server",
 		Long:    "Run the server for creating and managing https://github.com/Ishank09/data-extraction-service#",
