@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
@@ -13,6 +14,7 @@ import (
 	"github.com/ishank09/data-extraction-service/cmd/server/env"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/dataextractionhandler"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/health"
+	"github.com/ishank09/data-extraction-service/pkg/api/v1/msgraphhandler"
 	"github.com/ishank09/data-extraction-service/pkg/logging"
 	"github.com/ishank09/data-extraction-service/pkg/msgraph"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -88,6 +90,12 @@ func GetServerCmd() *cobra.Command {
 				return err
 			}
 
+			// Create OAuth-enabled msgraph handler
+			msgraphHandler, err := createMSGraphHandler(&cfg)
+			if err != nil {
+				log.Errorf("Failed to create msgraph handler: %v", err)
+			}
+
 			// Data extraction routes
 			v1 := engine.Group("/api/v1")
 			v1.GET("/documents", handler.GetAllDocuments, getMetricsMiddlewareHandler("GET /api/v1/documents", httpMetricsMiddlewareInstance))
@@ -95,6 +103,20 @@ func GetServerCmd() *cobra.Command {
 			v1.GET("/documents/type/:type", handler.GetDocumentsByType, getMetricsMiddlewareHandler("GET /api/v1/documents/type/:type", httpMetricsMiddlewareInstance))
 			v1.GET("/sources", handler.GetSources, getMetricsMiddlewareHandler("GET /api/v1/sources", httpMetricsMiddlewareInstance))
 			v1.GET("/health", handler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/health", httpMetricsMiddlewareInstance))
+
+			// OAuth routes for Microsoft Graph
+			if msgraphHandler != nil {
+				oauth := v1.Group("/oauth")
+				oauth.POST("/authorize", msgraphHandler.Authorize, getMetricsMiddlewareHandler("POST /api/v1/oauth/authorize", httpMetricsMiddlewareInstance))
+				oauth.GET("/callback", msgraphHandler.Callback, getMetricsMiddlewareHandler("GET /api/v1/oauth/callback", httpMetricsMiddlewareInstance))
+				oauth.POST("/refresh", msgraphHandler.RefreshToken, getMetricsMiddlewareHandler("POST /api/v1/oauth/refresh", httpMetricsMiddlewareInstance))
+				oauth.POST("/test", msgraphHandler.TestToken, getMetricsMiddlewareHandler("POST /api/v1/oauth/test", httpMetricsMiddlewareInstance))
+
+				// MSGraph routes
+				msgraph := v1.Group("/msgraph")
+				msgraph.GET("/documents", msgraphHandler.GetAllDocuments, getMetricsMiddlewareHandler("GET /api/v1/msgraph/documents", httpMetricsMiddlewareInstance))
+				msgraph.GET("/health", msgraphHandler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/msgraph/health", httpMetricsMiddlewareInstance))
+			}
 
 			// Register "/metrics" endpoint with Gin to expose Prometheus metrics.
 			engine.GET(
@@ -136,6 +158,7 @@ func createDataExtractionHandler(cfg *Config) (*dataextractionhandler.Handler, e
 				ClientSecret: cfg.MSGraph.ClientSecret,
 				TenantID:     cfg.MSGraph.TenantID,
 			},
+			UserID: cfg.MSGraph.UserID, // Pass user ID for application flow
 		}
 		return dataextractionhandler.New(config)
 	}
@@ -143,6 +166,48 @@ func createDataExtractionHandler(cfg *Config) (*dataextractionhandler.Handler, e
 	// Fallback to static files only
 	log.Infof("Creating data extraction handler with static files only (MSGraph not configured)")
 	return dataextractionhandler.New(nil)
+}
+
+// createMSGraphHandler creates a msgraph handler with OAuth configuration
+func createMSGraphHandler(cfg *Config) (*msgraphhandler.Handler, error) {
+	// Check if OAuth configuration is available
+	if cfg.MSGraph.ClientID != "" && cfg.MSGraph.ClientSecret != "" && cfg.MSGraph.TenantID != "" && cfg.OAuth.RedirectURI != "" {
+		log.Infof("Creating msgraph handler with OAuth integration")
+
+		config := &msgraphhandler.Config{
+			MSGraphConfig: &msgraph.Config{
+				ClientID:     cfg.MSGraph.ClientID,
+				ClientSecret: cfg.MSGraph.ClientSecret,
+				TenantID:     cfg.MSGraph.TenantID,
+			},
+			UserID: cfg.MSGraph.UserID,
+			OAuthConfig: &msgraph.OAuthConfig{
+				ClientID:     cfg.MSGraph.ClientID,
+				ClientSecret: cfg.MSGraph.ClientSecret,
+				TenantID:     cfg.MSGraph.TenantID,
+				RedirectURI:  cfg.OAuth.RedirectURI,
+				Scopes:       cfg.OAuth.Scopes,
+			},
+		}
+		return msgraphhandler.New(config)
+	}
+
+	// Check if basic MSGraph configuration is available (without OAuth)
+	if cfg.MSGraph.ClientID != "" && cfg.MSGraph.ClientSecret != "" && cfg.MSGraph.TenantID != "" {
+		log.Infof("Creating msgraph handler with basic MSGraph integration (no OAuth)")
+		config := &msgraphhandler.Config{
+			MSGraphConfig: &msgraph.Config{
+				ClientID:     cfg.MSGraph.ClientID,
+				ClientSecret: cfg.MSGraph.ClientSecret,
+				TenantID:     cfg.MSGraph.TenantID,
+			},
+			UserID: cfg.MSGraph.UserID,
+		}
+		return msgraphhandler.New(config)
+	}
+
+	log.Infof("MSGraph handler not configured (missing required configuration)")
+	return nil, nil
 }
 
 func getMetricsMiddlewareHandler(
@@ -165,6 +230,20 @@ func setCmdFlagsFromEnv(command *cobra.Command, cfg *Config) {
 	cfg.MSGraph.ClientID = os.Getenv(MSGraphClientIDEnvVar)
 	cfg.MSGraph.ClientSecret = os.Getenv(MSGraphClientSecretEnvVar)
 	cfg.MSGraph.TenantID = os.Getenv(MSGraphTenantIDEnvVar)
+	cfg.MSGraph.UserID = os.Getenv(MSGraphUserIDEnvVar)
+
+	// Set OAuth configuration from environment variables
+	cfg.OAuth.RedirectURI = os.Getenv(OAuthRedirectURIEnvVar)
+
+	// Parse scopes from comma-separated string
+	scopesStr := os.Getenv(OAuthScopesEnvVar)
+	if scopesStr != "" {
+		cfg.OAuth.Scopes = strings.Split(scopesStr, ",")
+		// Trim spaces from scopes
+		for i, scope := range cfg.OAuth.Scopes {
+			cfg.OAuth.Scopes[i] = strings.TrimSpace(scope)
+		}
+	}
 }
 
 func testStatusCodeAlertHandler(c *gin.Context) {

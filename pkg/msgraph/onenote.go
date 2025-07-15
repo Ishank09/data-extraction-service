@@ -145,82 +145,214 @@ func (c *Client) processPageContent(page msgraphmodels.OnenotePageable, notebook
 // LAYER 3: Data Source - Raw Data Fetching
 // ============================================================================
 
-// fetchOneNoteRawData fetches all raw OneNote data from the API
-// This layer is responsible for the actual API calls and data retrieval
+// fetchOneNoteRawData fetches all raw OneNote data from the API using flattened endpoints
+// This approach works better with personal Microsoft accounts
 func (c *Client) fetchOneNoteRawData(ctx context.Context) (*OneNoteRawData, error) {
+	log.Printf("🚀 Starting OneNote data fetching process...")
+
 	rawData := &OneNoteRawData{
 		Sections: make(map[string][]msgraphmodels.OnenoteSectionable),
 		Pages:    make(map[string][]msgraphmodels.OnenotePageable),
 		Content:  make(map[string][]byte),
 	}
 
-	// Fetch notebooks
-	notebooks, err := c.graphClient.Me().Onenote().Notebooks().Get(ctx, nil)
+	// Step 1: Fetch all notebooks using flattened endpoint
+	log.Printf("🔍 Fetching OneNote notebooks...")
+	var notebooks msgraphmodels.NotebookCollectionResponseable
+	var err error
+
+	if c.IsDelegatedAuth() {
+		notebooks, err = c.graphClient.Me().Onenote().Notebooks().Get(ctx, nil)
+	} else {
+		userID := c.GetUserID()
+		if userID == "" {
+			return nil, fmt.Errorf("user ID is required for application authentication flow")
+		}
+		notebooks, err = c.graphClient.Users().ByUserId(userID).Onenote().Notebooks().Get(ctx, nil)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch notebooks: %w", err)
 	}
 
 	if notebooks == nil || notebooks.GetValue() == nil {
+		log.Printf("⚠️  No notebooks found")
 		return rawData, nil // No notebooks found
 	}
 
 	rawData.Notebooks = notebooks.GetValue()
+	log.Printf("✅ Found %d notebooks", len(rawData.Notebooks))
 
-	// Fetch sections for each notebook
-	for _, notebook := range rawData.Notebooks {
+	for i, notebook := range rawData.Notebooks {
+		notebookName := getStringValue(notebook.GetDisplayName())
 		notebookID := getStringValue(notebook.GetId())
-		if notebookID == "" {
-			continue
-		}
-
-		sections, err := c.graphClient.Me().Onenote().Notebooks().ByNotebookId(notebookID).Sections().Get(ctx, nil)
-		if err != nil {
-			log.Printf("Failed to fetch sections for notebook %s: %v", notebookID, err)
-			continue
-		}
-
-		if sections != nil && sections.GetValue() != nil {
-			rawData.Sections[notebookID] = sections.GetValue()
-		}
+		log.Printf("  📚 Notebook %d: '%s' (ID: %s)", i+1, notebookName, notebookID)
 	}
 
-	// Fetch pages for each section
-	for notebookID, sections := range rawData.Sections {
-		for _, section := range sections {
+	// Step 2: Fetch all sections using flattened endpoint (instead of hierarchical)
+	log.Printf("🔍 Fetching OneNote sections...")
+	var allSections msgraphmodels.OnenoteSectionCollectionResponseable
+	if c.IsDelegatedAuth() {
+		allSections, err = c.graphClient.Me().Onenote().Sections().Get(ctx, nil)
+	} else {
+		userID := c.GetUserID()
+		allSections, err = c.graphClient.Users().ByUserId(userID).Onenote().Sections().Get(ctx, nil)
+	}
+
+	if err != nil {
+		log.Printf("❌ Failed to fetch sections: %v", err)
+	} else if allSections != nil && allSections.GetValue() != nil {
+		log.Printf("✅ Found %d sections", len(allSections.GetValue()))
+
+		// Group sections by notebook ID
+		for i, section := range allSections.GetValue() {
+			sectionName := getStringValue(section.GetDisplayName())
 			sectionID := getStringValue(section.GetId())
+
+			// Get the parent notebook ID from the section
+			parentNotebook := section.GetParentNotebook()
+			if parentNotebook != nil {
+				notebookID := getStringValue(parentNotebook.GetId())
+				parentNotebookName := getStringValue(parentNotebook.GetDisplayName())
+
+				log.Printf("  📂 Section %d: '%s' (ID: %s) in notebook '%s'", i+1, sectionName, sectionID, parentNotebookName)
+
+				if notebookID != "" {
+					if rawData.Sections[notebookID] == nil {
+						rawData.Sections[notebookID] = []msgraphmodels.OnenoteSectionable{}
+					}
+					rawData.Sections[notebookID] = append(rawData.Sections[notebookID], section)
+				}
+			} else {
+				log.Printf("  📂 Section %d: '%s' (ID: %s) - no parent notebook found", i+1, sectionName, sectionID)
+			}
+		}
+
+		log.Printf("📊 Sections grouped by notebook:")
+		for notebookID, sections := range rawData.Sections {
+			log.Printf("  📚 Notebook %s has %d sections", notebookID, len(sections))
+		}
+	} else {
+		log.Printf("⚠️  No sections found")
+	}
+
+	// Step 3: Fetch pages for each section individually (to avoid API limits)
+	log.Printf("🔍 Fetching pages for each section...")
+	totalSections := 0
+	totalPages := 0
+
+	for notebookID, sections := range rawData.Sections {
+		log.Printf("📚 Processing notebook %s (%d sections)...", notebookID, len(sections))
+
+		for sectionIndex, section := range sections {
+			sectionID := getStringValue(section.GetId())
+			sectionName := getStringValue(section.GetDisplayName())
+
 			if sectionID == "" {
+				log.Printf("  ⚠️  Section %d: '%s' - no ID found, skipping", sectionIndex+1, sectionName)
 				continue
 			}
 
-			pages, err := c.graphClient.Me().Onenote().Notebooks().ByNotebookId(notebookID).Sections().ByOnenoteSectionId(sectionID).Pages().Get(ctx, nil)
+			log.Printf("  🔍 Section %d/%d: Fetching pages for '%s' (ID: %s)...", sectionIndex+1, len(sections), sectionName, sectionID)
+			totalSections++
+
+			var pages msgraphmodels.OnenotePageCollectionResponseable
+			if c.IsDelegatedAuth() {
+				pages, err = c.graphClient.Me().Onenote().Sections().ByOnenoteSectionId(sectionID).Pages().Get(ctx, nil)
+			} else {
+				userID := c.GetUserID()
+				pages, err = c.graphClient.Users().ByUserId(userID).Onenote().Sections().ByOnenoteSectionId(sectionID).Pages().Get(ctx, nil)
+			}
+
 			if err != nil {
-				log.Printf("Failed to fetch pages for section %s: %v", sectionID, err)
+				log.Printf("  ❌ Failed to fetch pages for section '%s' (ID: %s): %v", sectionName, sectionID, err)
 				continue
 			}
 
 			if pages != nil && pages.GetValue() != nil {
+				pageCount := len(pages.GetValue())
+				totalPages += pageCount
 				rawData.Pages[sectionID] = pages.GetValue()
+				log.Printf("  ✅ Section '%s': Found %d pages", sectionName, pageCount)
+
+				for i, page := range pages.GetValue() {
+					pageTitle := getStringValue(page.GetTitle())
+					pageID := getStringValue(page.GetId())
+					log.Printf("    📄 Page %d: '%s' (ID: %s)", i+1, pageTitle, pageID)
+				}
+			} else {
+				log.Printf("  ⚠️  Section '%s': No pages found", sectionName)
 			}
 		}
 	}
 
-	// Fetch content for each page
-	for _, pages := range rawData.Pages {
-		for _, page := range pages {
+	log.Printf("📊 Page fetching summary: %d sections processed, %d total pages found", totalSections, totalPages)
+
+	// Step 4: Fetch content for each page
+	log.Printf("🔍 Fetching content for each page...")
+	totalContentPages := 0
+	successfulContentPages := 0
+
+	for sectionID, pages := range rawData.Pages {
+		if len(pages) == 0 {
+			continue
+		}
+
+		log.Printf("📂 Fetching content for %d pages in section %s...", len(pages), sectionID)
+
+		for pageIndex, page := range pages {
 			pageID := getStringValue(page.GetId())
+			pageTitle := getStringValue(page.GetTitle())
+
 			if pageID == "" {
+				log.Printf("  ⚠️  Page %d: '%s' - no ID found, skipping", pageIndex+1, pageTitle)
 				continue
 			}
 
-			content, err := c.graphClient.Me().Onenote().Pages().ByOnenotePageId(pageID).Content().Get(ctx, nil)
+			log.Printf("  🔍 Page %d/%d: Fetching content for '%s' (ID: %s)...", pageIndex+1, len(pages), pageTitle, pageID)
+			totalContentPages++
+
+			var content []byte
+			if c.IsDelegatedAuth() {
+				content, err = c.graphClient.Me().Onenote().Pages().ByOnenotePageId(pageID).Content().Get(ctx, nil)
+			} else {
+				userID := c.GetUserID()
+				content, err = c.graphClient.Users().ByUserId(userID).Onenote().Pages().ByOnenotePageId(pageID).Content().Get(ctx, nil)
+			}
+
 			if err != nil {
-				log.Printf("Failed to fetch content for page %s: %v", pageID, err)
+				log.Printf("  ❌ Failed to fetch content for page '%s' (ID: %s): %v", pageTitle, pageID, err)
 				continue
 			}
 
 			rawData.Content[pageID] = content
+			successfulContentPages++
+			contentSize := len(content)
+			log.Printf("  ✅ Page '%s': Got content (%d bytes)", pageTitle, contentSize)
 		}
 	}
+
+	log.Printf("📊 Content fetching summary: %d/%d pages successfully retrieved", successfulContentPages, totalContentPages)
+
+	// Final summary
+	totalNotebooks := len(rawData.Notebooks)
+	totalSectionsFound := 0
+	totalPagesFound := 0
+	totalContentFound := len(rawData.Content)
+
+	for _, sections := range rawData.Sections {
+		totalSectionsFound += len(sections)
+	}
+	for _, pages := range rawData.Pages {
+		totalPagesFound += len(pages)
+	}
+
+	log.Printf("🎉 OneNote data fetching completed!")
+	log.Printf("📊 Final summary:")
+	log.Printf("  📚 Notebooks: %d", totalNotebooks)
+	log.Printf("  📂 Sections: %d", totalSectionsFound)
+	log.Printf("  📄 Pages: %d", totalPagesFound)
+	log.Printf("  📝 Content retrieved: %d", totalContentFound)
 
 	return rawData, nil
 }

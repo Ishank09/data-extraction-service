@@ -19,6 +19,16 @@ type Interface interface {
 	GetOneNoteDataAsJSON(ctx context.Context) (*types.DocumentCollection, error)
 }
 
+// AuthType represents the type of authentication being used
+type AuthType int
+
+const (
+	// AuthTypeApplication represents client credentials flow (application permissions)
+	AuthTypeApplication AuthType = iota
+	// AuthTypeDelegated represents delegated flow (user permissions)
+	AuthTypeDelegated
+)
+
 // Config represents the configuration for Microsoft Graph client
 type Config struct {
 	ClientID      string
@@ -36,6 +46,8 @@ type Client struct {
 	loginEndpoint string
 	scopes        []string
 	graphClient   *msgraph.GraphServiceClient
+	authType      AuthType // Track authentication type
+	userID        string   // User ID for application flow
 }
 
 // NewClient creates a new Microsoft Graph client with service credentials (client credentials flow)
@@ -44,9 +56,10 @@ func NewClient(config Config) (*Client, error) {
 	scopes := config.Scopes
 	if len(scopes) == 0 {
 		scopes = []string{
-			"Notes.Read",
-			"Notes.Read.All",
-			"User.Read",
+			// "Notes.Read",
+			// "Notes.Read.All",
+			// "User.Read",
+			"https://graph.microsoft.com/.default",
 		}
 	}
 
@@ -69,6 +82,7 @@ func NewClient(config Config) (*Client, error) {
 		loginEndpoint: config.LoginEndpoint,
 		scopes:        scopes,
 		graphClient:   graphClient,
+		authType:      AuthTypeApplication,
 	}, nil
 }
 
@@ -97,8 +111,29 @@ func NewClientWithToken(accessToken string) (*Client, error) {
 	return &Client{
 		graphClient: graphClient,
 		scopes:      scopes,
+		authType:    AuthTypeDelegated,
 		// Note: clientID, clientSecret, tenantID, loginEndpoint are not needed for token-based auth
 	}, nil
+}
+
+// NewClientWithUserID creates a new Microsoft Graph client with service credentials for a specific user
+func NewClientWithUserID(config Config, userID string) (*Client, error) {
+	client, err := NewClient(config)
+	if err != nil {
+		return nil, err
+	}
+	client.userID = userID
+	return client, nil
+}
+
+// IsDelegatedAuth returns true if the client uses delegated authentication flow
+func (c *Client) IsDelegatedAuth() bool {
+	return c.authType == AuthTypeDelegated
+}
+
+// GetUserID returns the user ID for application flow
+func (c *Client) GetUserID() string {
+	return c.userID
 }
 
 // GetGraphClient returns the underlying Microsoft Graph client

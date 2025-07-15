@@ -103,7 +103,8 @@ func TestNewClient(t *testing.T) {
 			// Verify scopes
 			expectedScopes := tt.config.Scopes
 			if len(expectedScopes) == 0 {
-				expectedScopes = []string{"Notes.Read", "Notes.Read.All", "User.Read"}
+				// For application authentication, default to .default scope
+				expectedScopes = []string{"https://graph.microsoft.com/.default"}
 			}
 			if len(client.scopes) != len(expectedScopes) {
 				t.Errorf("Expected %d scopes, got %d", len(expectedScopes), len(client.scopes))
@@ -266,7 +267,7 @@ func TestConfig_DefaultScopes(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	expectedScopes := []string{"Notes.Read", "Notes.Read.All", "User.Read"}
+	expectedScopes := []string{"https://graph.microsoft.com/.default"}
 	if len(client.scopes) != len(expectedScopes) {
 		t.Errorf("Expected %d default scopes, got %d", len(expectedScopes), len(client.scopes))
 	}

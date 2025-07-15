@@ -72,3 +72,6 @@ tmp/
 *.obj
 *.lib
 *.pdb
+
+# Test files in static directories
+pkg/static/*/files/

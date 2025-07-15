@@ -23,6 +23,7 @@ type Handler struct {
 // Config represents the configuration for the data extraction handler
 type Config struct {
 	MSGraphConfig *msgraph.Config `json:"msgraph_config,omitempty"`
+	UserID        string          `json:"user_id,omitempty"` // Required for application flow when accessing user data
 }
 
 // New creates a new data extraction handler
@@ -35,6 +36,7 @@ func New(config *Config) (*Handler, error) {
 	if config != nil && config.MSGraphConfig != nil {
 		msgraphConfig := &msgraphhandler.Config{
 			MSGraphConfig: config.MSGraphConfig,
+			UserID:        config.UserID, // Pass user ID for application flow
 		}
 
 		msgraphHandler, err := msgraphhandler.New(msgraphConfig)
@@ -68,6 +70,16 @@ func (h *Handler) getMsgraphDocuments(ctx context.Context) (*types.DocumentColle
 	}
 
 	return h.msgraphHandler.GetDocuments(ctx)
+}
+
+// getMsgraphDocumentsWithToken retrieves documents using an access token
+func (h *Handler) getMsgraphDocumentsWithToken(ctx context.Context, token string) (*types.DocumentCollection, error) {
+	tempHandler, err := msgraphhandler.NewWithToken(token)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create msgraph client with token: %w", err)
+	}
+
+	return tempHandler.GetDocuments(ctx)
 }
 
 // mergeDocuments merges documents from different sources into a single collection
@@ -105,9 +117,25 @@ func (h *Handler) GetAllDocuments(c *gin.Context) {
 		return
 	}
 
-	// Get msgraph documents (if configured)
+	// Get msgraph documents
 	var msgraphDocs *types.DocumentCollection
-	if h.msgraphHandler != nil && h.msgraphHandler.IsConfigured() {
+
+	// Check for Authorization header with Bearer token
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		// Extract token from Authorization header
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+
+		msgraphDocs, err = h.getMsgraphDocumentsWithToken(ctx, token)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":   "Failed to retrieve msgraph documents with provided token",
+				"details": err.Error(),
+			})
+			return
+		}
+	} else if h.msgraphHandler != nil && h.msgraphHandler.IsConfigured() {
+		// Use configured msgraph handler
 		msgraphDocs, err = h.getMsgraphDocuments(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -142,9 +170,29 @@ func (h *Handler) GetDocumentsBySource(c *gin.Context) {
 		c.JSON(http.StatusOK, collection)
 
 	case "msgraph", "onenote":
+		// Check for Authorization header with Bearer token
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			// Extract token from Authorization header
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+
+			collection, err := h.getMsgraphDocumentsWithToken(ctx, token)
+			if err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error":   "Failed to retrieve msgraph documents with provided token",
+					"details": err.Error(),
+				})
+				return
+			}
+			c.JSON(http.StatusOK, collection)
+			return
+		}
+
+		// Fall back to configured handler
 		if h.msgraphHandler == nil || !h.msgraphHandler.IsConfigured() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "Microsoft Graph client not configured",
+				"error":   "Microsoft Graph client not configured and no access token provided",
+				"message": "Either configure the service with client credentials or provide an Authorization header with Bearer token",
 			})
 			return
 		}
