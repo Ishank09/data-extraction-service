@@ -14,6 +14,10 @@ type Config struct {
 		RedirectURI string
 		Scopes      []string
 	}
+	OneNote struct {
+		MaxSectionWorkers int // Maximum concurrent section workers for OneNote processing
+		MaxContentWorkers int // Maximum concurrent content workers for OneNote processing
+	}
 }
 
 const (
@@ -29,4 +33,8 @@ const (
 	// OAuth environment variables
 	OAuthRedirectURIEnvVar = "OAUTH_REDIRECT_URI"
 	OAuthScopesEnvVar      = "OAUTH_SCOPES" // Comma-separated list of scopes
+
+	// OneNote performance tuning environment variables
+	OneNoteSectionWorkersEnvVar = "ONENOTE_SECTION_WORKERS" // Max concurrent section workers (default: 5)
+	OneNoteContentWorkersEnvVar = "ONENOTE_CONTENT_WORKERS" // Max concurrent content workers (default: 10)
 )

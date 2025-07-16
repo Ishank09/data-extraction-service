@@ -152,11 +152,17 @@ func createDataExtractionHandler(cfg *Config) (*dataextractionhandler.Handler, e
 	// Check if MSGraph configuration is available
 	if cfg.MSGraph.ClientID != "" && cfg.MSGraph.ClientSecret != "" && cfg.MSGraph.TenantID != "" {
 		log.Infof("Creating data extraction handler with MSGraph integration")
+		log.Infof("OneNote concurrency: %d section workers, %d content workers", cfg.OneNote.MaxSectionWorkers, cfg.OneNote.MaxContentWorkers)
+
 		config := &dataextractionhandler.Config{
 			MSGraphConfig: &msgraph.Config{
 				ClientID:     cfg.MSGraph.ClientID,
 				ClientSecret: cfg.MSGraph.ClientSecret,
 				TenantID:     cfg.MSGraph.TenantID,
+				OneNoteConcurrency: &msgraph.ConcurrencyConfig{
+					MaxSectionWorkers: cfg.OneNote.MaxSectionWorkers,
+					MaxContentWorkers: cfg.OneNote.MaxContentWorkers,
+				},
 			},
 			UserID: cfg.MSGraph.UserID, // Pass user ID for application flow
 		}
@@ -179,6 +185,10 @@ func createMSGraphHandler(cfg *Config) (*msgraphhandler.Handler, error) {
 				ClientID:     cfg.MSGraph.ClientID,
 				ClientSecret: cfg.MSGraph.ClientSecret,
 				TenantID:     cfg.MSGraph.TenantID,
+				OneNoteConcurrency: &msgraph.ConcurrencyConfig{
+					MaxSectionWorkers: cfg.OneNote.MaxSectionWorkers,
+					MaxContentWorkers: cfg.OneNote.MaxContentWorkers,
+				},
 			},
 			UserID: cfg.MSGraph.UserID,
 			OAuthConfig: &msgraph.OAuthConfig{
@@ -200,6 +210,10 @@ func createMSGraphHandler(cfg *Config) (*msgraphhandler.Handler, error) {
 				ClientID:     cfg.MSGraph.ClientID,
 				ClientSecret: cfg.MSGraph.ClientSecret,
 				TenantID:     cfg.MSGraph.TenantID,
+				OneNoteConcurrency: &msgraph.ConcurrencyConfig{
+					MaxSectionWorkers: cfg.OneNote.MaxSectionWorkers,
+					MaxContentWorkers: cfg.OneNote.MaxContentWorkers,
+				},
 			},
 			UserID: cfg.MSGraph.UserID,
 		}
@@ -244,6 +258,10 @@ func setCmdFlagsFromEnv(command *cobra.Command, cfg *Config) {
 			cfg.OAuth.Scopes[i] = strings.TrimSpace(scope)
 		}
 	}
+
+	// Set OneNote concurrency configuration
+	cfg.OneNote.MaxSectionWorkers = int(env.ParseInt(OneNoteSectionWorkersEnvVar, 5))  // Default: 5 workers
+	cfg.OneNote.MaxContentWorkers = int(env.ParseInt(OneNoteContentWorkersEnvVar, 10)) // Default: 10 workers
 }
 
 func testStatusCodeAlertHandler(c *gin.Context) {

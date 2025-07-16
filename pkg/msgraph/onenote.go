@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	msgraphmodels "github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -19,6 +20,36 @@ type OneNoteRawData struct {
 	Sections  map[string][]msgraphmodels.OnenoteSectionable
 	Pages     map[string][]msgraphmodels.OnenotePageable
 	Content   map[string][]byte
+}
+
+// SectionJob represents a section processing job
+type SectionJob struct {
+	NotebookID    string
+	Section       msgraphmodels.OnenoteSectionable
+	SectionIndex  int
+	TotalSections int
+}
+
+// SectionResult represents the result of section processing
+type SectionResult struct {
+	SectionID string
+	Pages     []msgraphmodels.OnenotePageable
+	Error     error
+}
+
+// ContentJob represents a content fetching job
+type ContentJob struct {
+	PageID     string
+	PageTitle  string
+	PageIndex  int
+	TotalPages int
+}
+
+// ContentResult represents the result of content fetching
+type ContentResult struct {
+	PageID  string
+	Content []byte
+	Error   error
 }
 
 // ============================================================================
@@ -41,8 +72,8 @@ func (c *Client) combineOneNoteData(ctx context.Context) (*types.DocumentCollect
 	// Create document collection
 	collection := types.NewDocumentCollection("OneNote")
 
-	// Fetch raw OneNote data
-	rawData, err := c.fetchOneNoteRawData(ctx)
+	// Fetch raw OneNote data using concurrent implementation
+	rawData, err := c.fetchOneNoteRawDataConcurrent(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch OneNote data: %w", err)
 	}
@@ -142,11 +173,364 @@ func (c *Client) processPageContent(page msgraphmodels.OnenotePageable, notebook
 }
 
 // ============================================================================
-// LAYER 3: Data Source - Raw Data Fetching
+// LAYER 3: Data Source - Concurrent Raw Data Fetching
+// ============================================================================
+
+// fetchOneNoteRawDataConcurrent fetches all raw OneNote data from the API using concurrent workers
+// This implementation significantly improves performance by parallelizing API calls
+func (c *Client) fetchOneNoteRawDataConcurrent(ctx context.Context) (*OneNoteRawData, error) {
+	return c.fetchOneNoteRawDataConcurrentWithConfig(ctx, c.oneNoteConcurrency)
+}
+
+// fetchOneNoteRawDataConcurrentWithConfig fetches OneNote data with custom concurrency configuration
+func (c *Client) fetchOneNoteRawDataConcurrentWithConfig(ctx context.Context, config ConcurrencyConfig) (*OneNoteRawData, error) {
+	log.Printf("🚀 Starting concurrent OneNote data fetching process...")
+	log.Printf("⚙️  Concurrency config: %d section workers, %d content workers", config.MaxSectionWorkers, config.MaxContentWorkers)
+
+	rawData := &OneNoteRawData{
+		Sections: make(map[string][]msgraphmodels.OnenoteSectionable),
+		Pages:    make(map[string][]msgraphmodels.OnenotePageable),
+		Content:  make(map[string][]byte),
+	}
+
+	// Use mutex to protect shared data structures
+	var dataMutex sync.RWMutex
+
+	// Step 1: Fetch all notebooks (sequential as it's typically few items)
+	log.Printf("🔍 Fetching OneNote notebooks...")
+	var notebooks msgraphmodels.NotebookCollectionResponseable
+	var err error
+
+	if c.IsDelegatedAuth() {
+		notebooks, err = c.graphClient.Me().Onenote().Notebooks().Get(ctx, nil)
+	} else {
+		userID := c.GetUserID()
+		if userID == "" {
+			return nil, fmt.Errorf("user ID is required for application authentication flow")
+		}
+		notebooks, err = c.graphClient.Users().ByUserId(userID).Onenote().Notebooks().Get(ctx, nil)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch notebooks: %w", err)
+	}
+
+	if notebooks == nil || notebooks.GetValue() == nil {
+		log.Printf("⚠️  No notebooks found")
+		return rawData, nil
+	}
+
+	rawData.Notebooks = notebooks.GetValue()
+	log.Printf("✅ Found %d notebooks", len(rawData.Notebooks))
+
+	// Step 2: Fetch all sections (sequential as it's a single API call)
+	log.Printf("🔍 Fetching OneNote sections...")
+	var allSections msgraphmodels.OnenoteSectionCollectionResponseable
+	if c.IsDelegatedAuth() {
+		allSections, err = c.graphClient.Me().Onenote().Sections().Get(ctx, nil)
+	} else {
+		userID := c.GetUserID()
+		allSections, err = c.graphClient.Users().ByUserId(userID).Onenote().Sections().Get(ctx, nil)
+	}
+
+	if err != nil {
+		log.Printf("❌ Failed to fetch sections: %v", err)
+		return rawData, nil
+	}
+
+	if allSections == nil || allSections.GetValue() == nil {
+		log.Printf("⚠️  No sections found")
+		return rawData, nil
+	}
+
+	// Group sections by notebook ID
+	for _, section := range allSections.GetValue() {
+		parentNotebook := section.GetParentNotebook()
+		if parentNotebook != nil {
+			notebookID := getStringValue(parentNotebook.GetId())
+			if notebookID != "" {
+				if rawData.Sections[notebookID] == nil {
+					rawData.Sections[notebookID] = []msgraphmodels.OnenoteSectionable{}
+				}
+				rawData.Sections[notebookID] = append(rawData.Sections[notebookID], section)
+			}
+		}
+	}
+
+	log.Printf("✅ Found %d sections grouped by notebook", len(allSections.GetValue()))
+
+	// Step 3: Concurrent page fetching for each section
+	log.Printf("🔍 Starting concurrent page fetching for sections...")
+
+	// Collect all section jobs
+	var sectionJobs []SectionJob
+	for notebookID, sections := range rawData.Sections {
+		for i, section := range sections {
+			sectionJobs = append(sectionJobs, SectionJob{
+				NotebookID:    notebookID,
+				Section:       section,
+				SectionIndex:  i + 1,
+				TotalSections: len(sections),
+			})
+		}
+	}
+
+	if len(sectionJobs) == 0 {
+		log.Printf("⚠️  No sections to process")
+		return rawData, nil
+	}
+
+	// Create channels for section worker pool
+	sectionJobChan := make(chan SectionJob, len(sectionJobs))
+	sectionResultChan := make(chan SectionResult, len(sectionJobs))
+
+	// Start section workers
+	var sectionWG sync.WaitGroup
+	for i := 0; i < config.MaxSectionWorkers; i++ {
+		sectionWG.Add(1)
+		go c.sectionWorker(ctx, &sectionWG, sectionJobChan, sectionResultChan)
+	}
+
+	// Send section jobs
+	for _, job := range sectionJobs {
+		sectionJobChan <- job
+	}
+	close(sectionJobChan)
+
+	// Wait for all section workers to complete
+	go func() {
+		sectionWG.Wait()
+		close(sectionResultChan)
+	}()
+
+	// Collect section results
+	var sectionErrors []error
+	totalPages := 0
+	for result := range sectionResultChan {
+		if result.Error != nil {
+			sectionErrors = append(sectionErrors, result.Error)
+			log.Printf("❌ Section processing error: %v", result.Error)
+			continue
+		}
+
+		dataMutex.Lock()
+		rawData.Pages[result.SectionID] = result.Pages
+		dataMutex.Unlock()
+
+		totalPages += len(result.Pages)
+		log.Printf("✅ Section %s: Found %d pages", result.SectionID, len(result.Pages))
+	}
+
+	log.Printf("📊 Concurrent page fetching completed: %d total pages found", totalPages)
+
+	// Step 4: Concurrent content fetching for all pages
+	log.Printf("🔍 Starting concurrent content fetching for pages...")
+
+	// Collect all content jobs
+	var contentJobs []ContentJob
+	pageIndex := 0
+	dataMutex.RLock()
+	for _, pages := range rawData.Pages {
+		for _, page := range pages {
+			pageID := getStringValue(page.GetId())
+			pageTitle := getStringValue(page.GetTitle())
+			if pageID != "" {
+				contentJobs = append(contentJobs, ContentJob{
+					PageID:     pageID,
+					PageTitle:  pageTitle,
+					PageIndex:  pageIndex + 1,
+					TotalPages: totalPages,
+				})
+				pageIndex++
+			}
+		}
+	}
+	dataMutex.RUnlock()
+
+	if len(contentJobs) == 0 {
+		log.Printf("⚠️  No pages to fetch content for")
+		return rawData, nil
+	}
+
+	// Create channels for content worker pool
+	contentJobChan := make(chan ContentJob, len(contentJobs))
+	contentResultChan := make(chan ContentResult, len(contentJobs))
+
+	// Start content workers
+	var contentWG sync.WaitGroup
+	for i := 0; i < config.MaxContentWorkers; i++ {
+		contentWG.Add(1)
+		go c.contentWorker(ctx, &contentWG, contentJobChan, contentResultChan)
+	}
+
+	// Send content jobs
+	for _, job := range contentJobs {
+		contentJobChan <- job
+	}
+	close(contentJobChan)
+
+	// Wait for all content workers to complete
+	go func() {
+		contentWG.Wait()
+		close(contentResultChan)
+	}()
+
+	// Collect content results
+	var contentErrors []error
+	successfulContent := 0
+	for result := range contentResultChan {
+		if result.Error != nil {
+			contentErrors = append(contentErrors, result.Error)
+			log.Printf("❌ Content fetching error for page %s: %v", result.PageID, result.Error)
+			continue
+		}
+
+		dataMutex.Lock()
+		rawData.Content[result.PageID] = result.Content
+		dataMutex.Unlock()
+
+		successfulContent++
+	}
+
+	log.Printf("📊 Concurrent content fetching completed: %d/%d pages successful", successfulContent, len(contentJobs))
+
+	// Log any errors but don't fail the entire operation
+	if len(sectionErrors) > 0 {
+		log.Printf("⚠️  Section errors encountered: %d", len(sectionErrors))
+	}
+	if len(contentErrors) > 0 {
+		log.Printf("⚠️  Content errors encountered: %d", len(contentErrors))
+	}
+
+	// Final summary
+	dataMutex.RLock()
+	totalNotebooks := len(rawData.Notebooks)
+	totalSectionsFound := 0
+	totalPagesFound := 0
+	totalContentFound := len(rawData.Content)
+
+	for _, sections := range rawData.Sections {
+		totalSectionsFound += len(sections)
+	}
+	for _, pages := range rawData.Pages {
+		totalPagesFound += len(pages)
+	}
+	dataMutex.RUnlock()
+
+	log.Printf("🎉 Concurrent OneNote data fetching completed!")
+	log.Printf("📊 Final summary:")
+	log.Printf("  📚 Notebooks: %d", totalNotebooks)
+	log.Printf("  📂 Sections: %d", totalSectionsFound)
+	log.Printf("  📄 Pages: %d", totalPagesFound)
+	log.Printf("  📝 Content retrieved: %d", totalContentFound)
+	log.Printf("  ⚡ Performance: Used %d section workers, %d content workers", config.MaxSectionWorkers, config.MaxContentWorkers)
+
+	return rawData, nil
+}
+
+// sectionWorker processes section jobs concurrently
+func (c *Client) sectionWorker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan SectionJob, results chan<- SectionResult) {
+	defer wg.Done()
+
+	for job := range jobs {
+		select {
+		case <-ctx.Done():
+			results <- SectionResult{Error: ctx.Err()}
+			return
+		default:
+		}
+
+		sectionID := getStringValue(job.Section.GetId())
+		sectionName := getStringValue(job.Section.GetDisplayName())
+
+		if sectionID == "" {
+			results <- SectionResult{
+				SectionID: sectionID,
+				Error:     fmt.Errorf("section %s has no ID", sectionName),
+			}
+			continue
+		}
+
+		log.Printf("  🔍 Worker fetching pages for section '%s' (ID: %s)...", sectionName, sectionID)
+
+		var pages msgraphmodels.OnenotePageCollectionResponseable
+		var err error
+
+		if c.IsDelegatedAuth() {
+			pages, err = c.graphClient.Me().Onenote().Sections().ByOnenoteSectionId(sectionID).Pages().Get(ctx, nil)
+		} else {
+			userID := c.GetUserID()
+			pages, err = c.graphClient.Users().ByUserId(userID).Onenote().Sections().ByOnenoteSectionId(sectionID).Pages().Get(ctx, nil)
+		}
+
+		if err != nil {
+			results <- SectionResult{
+				SectionID: sectionID,
+				Error:     fmt.Errorf("failed to fetch pages for section %s: %w", sectionName, err),
+			}
+			continue
+		}
+
+		var pageList []msgraphmodels.OnenotePageable
+		if pages != nil && pages.GetValue() != nil {
+			pageList = pages.GetValue()
+		}
+
+		results <- SectionResult{
+			SectionID: sectionID,
+			Pages:     pageList,
+			Error:     nil,
+		}
+	}
+}
+
+// contentWorker processes content jobs concurrently
+func (c *Client) contentWorker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan ContentJob, results chan<- ContentResult) {
+	defer wg.Done()
+
+	for job := range jobs {
+		select {
+		case <-ctx.Done():
+			results <- ContentResult{Error: ctx.Err()}
+			return
+		default:
+		}
+
+		log.Printf("  🔍 Worker fetching content for page '%s' (ID: %s)...", job.PageTitle, job.PageID)
+
+		var content []byte
+		var err error
+
+		if c.IsDelegatedAuth() {
+			content, err = c.graphClient.Me().Onenote().Pages().ByOnenotePageId(job.PageID).Content().Get(ctx, nil)
+		} else {
+			userID := c.GetUserID()
+			content, err = c.graphClient.Users().ByUserId(userID).Onenote().Pages().ByOnenotePageId(job.PageID).Content().Get(ctx, nil)
+		}
+
+		if err != nil {
+			results <- ContentResult{
+				PageID: job.PageID,
+				Error:  fmt.Errorf("failed to fetch content for page %s: %w", job.PageTitle, err),
+			}
+			continue
+		}
+
+		results <- ContentResult{
+			PageID:  job.PageID,
+			Content: content,
+			Error:   nil,
+		}
+	}
+}
+
+// ============================================================================
+// Legacy Sequential Implementation (kept for fallback)
 // ============================================================================
 
 // fetchOneNoteRawData fetches all raw OneNote data from the API using flattened endpoints
 // This approach works better with personal Microsoft accounts
+// DEPRECATED: Use fetchOneNoteRawDataConcurrent for better performance
 func (c *Client) fetchOneNoteRawData(ctx context.Context) (*OneNoteRawData, error) {
 	log.Printf("🚀 Starting OneNote data fetching process...")
 

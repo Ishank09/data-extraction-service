@@ -29,6 +29,20 @@ const (
 	AuthTypeDelegated
 )
 
+// ConcurrencyConfig defines limits for concurrent operations
+type ConcurrencyConfig struct {
+	MaxSectionWorkers int // Maximum concurrent section fetchers
+	MaxContentWorkers int // Maximum concurrent content fetchers
+}
+
+// DefaultConcurrencyConfig returns sensible defaults for API rate limiting
+func DefaultConcurrencyConfig() ConcurrencyConfig {
+	return ConcurrencyConfig{
+		MaxSectionWorkers: 5,  // Conservative limit for section processing
+		MaxContentWorkers: 10, // Higher limit for content fetching as it's the main bottleneck
+	}
+}
+
 // Config represents the configuration for Microsoft Graph client
 type Config struct {
 	ClientID      string
@@ -36,6 +50,8 @@ type Config struct {
 	TenantID      string
 	LoginEndpoint string
 	Scopes        []string
+	// OneNote concurrency configuration
+	OneNoteConcurrency *ConcurrencyConfig
 }
 
 // Client represents the base Microsoft Graph client
@@ -48,6 +64,8 @@ type Client struct {
 	graphClient   *msgraph.GraphServiceClient
 	authType      AuthType // Track authentication type
 	userID        string   // User ID for application flow
+	// OneNote concurrency configuration
+	oneNoteConcurrency ConcurrencyConfig
 }
 
 // NewClient creates a new Microsoft Graph client with service credentials (client credentials flow)
@@ -75,14 +93,21 @@ func NewClient(config Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to create graph client: %w", err)
 	}
 
+	// Set OneNote concurrency configuration
+	concurrencyConfig := DefaultConcurrencyConfig()
+	if config.OneNoteConcurrency != nil {
+		concurrencyConfig = *config.OneNoteConcurrency
+	}
+
 	return &Client{
-		clientID:      config.ClientID,
-		clientSecret:  config.ClientSecret,
-		tenantID:      config.TenantID,
-		loginEndpoint: config.LoginEndpoint,
-		scopes:        scopes,
-		graphClient:   graphClient,
-		authType:      AuthTypeApplication,
+		clientID:           config.ClientID,
+		clientSecret:       config.ClientSecret,
+		tenantID:           config.TenantID,
+		loginEndpoint:      config.LoginEndpoint,
+		scopes:             scopes,
+		graphClient:        graphClient,
+		authType:           AuthTypeApplication,
+		oneNoteConcurrency: concurrencyConfig,
 	}, nil
 }
 
@@ -109,9 +134,10 @@ func NewClientWithToken(accessToken string) (*Client, error) {
 	}
 
 	return &Client{
-		graphClient: graphClient,
-		scopes:      scopes,
-		authType:    AuthTypeDelegated,
+		graphClient:        graphClient,
+		scopes:             scopes,
+		authType:           AuthTypeDelegated,
+		oneNoteConcurrency: DefaultConcurrencyConfig(), // Use default for token-based auth
 		// Note: clientID, clientSecret, tenantID, loginEndpoint are not needed for token-based auth
 	}, nil
 }

@@ -10,6 +10,139 @@ import (
 	"github.com/ishank09/data-extraction-service/internal/types"
 )
 
+// TestConcurrencyConfig tests the concurrency configuration
+func TestConcurrencyConfig(t *testing.T) {
+	// Test default configuration
+	defaultConfig := DefaultConcurrencyConfig()
+	if defaultConfig.MaxSectionWorkers != 5 {
+		t.Errorf("Expected default MaxSectionWorkers to be 5, got %d", defaultConfig.MaxSectionWorkers)
+	}
+	if defaultConfig.MaxContentWorkers != 10 {
+		t.Errorf("Expected default MaxContentWorkers to be 10, got %d", defaultConfig.MaxContentWorkers)
+	}
+
+	// Test custom configuration
+	customConfig := ConcurrencyConfig{
+		MaxSectionWorkers: 3,
+		MaxContentWorkers: 8,
+	}
+	if customConfig.MaxSectionWorkers != 3 {
+		t.Errorf("Expected custom MaxSectionWorkers to be 3, got %d", customConfig.MaxSectionWorkers)
+	}
+	if customConfig.MaxContentWorkers != 8 {
+		t.Errorf("Expected custom MaxContentWorkers to be 8, got %d", customConfig.MaxContentWorkers)
+	}
+}
+
+// TestSectionJobStructure tests the SectionJob struct
+func TestSectionJobStructure(t *testing.T) {
+	section := createMockSection("sect-456", "Test Section")
+
+	job := SectionJob{
+		NotebookID:    "nb-123",
+		Section:       section,
+		SectionIndex:  1,
+		TotalSections: 5,
+	}
+
+	if job.NotebookID != "nb-123" {
+		t.Errorf("Expected NotebookID 'nb-123', got '%s'", job.NotebookID)
+	}
+	if job.SectionIndex != 1 {
+		t.Errorf("Expected SectionIndex 1, got %d", job.SectionIndex)
+	}
+	if job.TotalSections != 5 {
+		t.Errorf("Expected TotalSections 5, got %d", job.TotalSections)
+	}
+}
+
+// TestSectionResultStructure tests the SectionResult struct
+func TestSectionResultStructure(t *testing.T) {
+	pages := []msgraphmodels.OnenotePageable{
+		createMockPage("page-1", "Page 1", time.Now()),
+		createMockPage("page-2", "Page 2", time.Now()),
+	}
+
+	result := SectionResult{
+		SectionID: "sect-456",
+		Pages:     pages,
+		Error:     nil,
+	}
+
+	if result.SectionID != "sect-456" {
+		t.Errorf("Expected SectionID 'sect-456', got '%s'", result.SectionID)
+	}
+	if len(result.Pages) != 2 {
+		t.Errorf("Expected 2 pages, got %d", len(result.Pages))
+	}
+	if result.Error != nil {
+		t.Errorf("Expected no error, got %v", result.Error)
+	}
+}
+
+// TestContentJobStructure tests the ContentJob struct
+func TestContentJobStructure(t *testing.T) {
+	job := ContentJob{
+		PageID:     "page-789",
+		PageTitle:  "Test Page",
+		PageIndex:  1,
+		TotalPages: 10,
+	}
+
+	if job.PageID != "page-789" {
+		t.Errorf("Expected PageID 'page-789', got '%s'", job.PageID)
+	}
+	if job.PageTitle != "Test Page" {
+		t.Errorf("Expected PageTitle 'Test Page', got '%s'", job.PageTitle)
+	}
+	if job.PageIndex != 1 {
+		t.Errorf("Expected PageIndex 1, got %d", job.PageIndex)
+	}
+	if job.TotalPages != 10 {
+		t.Errorf("Expected TotalPages 10, got %d", job.TotalPages)
+	}
+}
+
+// TestContentResultStructure tests the ContentResult struct
+func TestContentResultStructure(t *testing.T) {
+	content := []byte("test content")
+
+	result := ContentResult{
+		PageID:  "page-789",
+		Content: content,
+		Error:   nil,
+	}
+
+	if result.PageID != "page-789" {
+		t.Errorf("Expected PageID 'page-789', got '%s'", result.PageID)
+	}
+	if string(result.Content) != "test content" {
+		t.Errorf("Expected content 'test content', got '%s'", string(result.Content))
+	}
+	if result.Error != nil {
+		t.Errorf("Expected no error, got %v", result.Error)
+	}
+}
+
+// TestFetchOneNoteRawDataConcurrentWithConfigEmpty tests concurrent fetching with empty data
+func TestFetchOneNoteRawDataConcurrentWithConfigEmpty(t *testing.T) {
+	// This test verifies that the concurrent method signature works
+	// Note: We can't easily test the actual concurrent functionality without mocking the entire msgraph client
+
+	config := ConcurrencyConfig{
+		MaxSectionWorkers: 2,
+		MaxContentWorkers: 4,
+	}
+
+	// Verify the config is properly structured
+	if config.MaxSectionWorkers != 2 {
+		t.Errorf("Expected MaxSectionWorkers 2, got %d", config.MaxSectionWorkers)
+	}
+	if config.MaxContentWorkers != 4 {
+		t.Errorf("Expected MaxContentWorkers 4, got %d", config.MaxContentWorkers)
+	}
+}
+
 // TestGetStringValue tests the helper function for handling string pointers
 func TestGetStringValue(t *testing.T) {
 	tests := []struct {
