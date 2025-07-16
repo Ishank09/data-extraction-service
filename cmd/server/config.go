@@ -18,6 +18,13 @@ type Config struct {
 		MaxSectionWorkers int // Maximum concurrent section workers for OneNote processing
 		MaxContentWorkers int // Maximum concurrent content workers for OneNote processing
 	}
+	MongoDB struct {
+		URI        string
+		Database   string
+		Username   string
+		Password   string
+		AuthSource string
+	}
 }
 
 const (
@@ -37,4 +44,11 @@ const (
 	// OneNote performance tuning environment variables
 	OneNoteSectionWorkersEnvVar = "ONENOTE_SECTION_WORKERS" // Max concurrent section workers (default: 5)
 	OneNoteContentWorkersEnvVar = "ONENOTE_CONTENT_WORKERS" // Max concurrent content workers (default: 10)
+
+	// MongoDB environment variables
+	MongoDBURIEnvVar        = "MONGODB_URI"
+	MongoDBDatabaseEnvVar   = "MONGODB_DATABASE"
+	MongoDBUsernameEnvVar   = "MONGODB_USERNAME"
+	MongoDBPasswordEnvVar   = "MONGODB_PASSWORD"
+	MongoDBAuthSourceEnvVar = "MONGODB_AUTH_SOURCE"
 )

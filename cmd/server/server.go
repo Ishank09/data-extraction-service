@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,10 +13,12 @@ import (
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
 	"github.com/ishank09/data-extraction-service/cmd/server/env"
+	"github.com/ishank09/data-extraction-service/pkg/api/v1/documenthandler"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/health"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/msgraphhandler"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/pipelinehandler"
 	"github.com/ishank09/data-extraction-service/pkg/logging"
+	"github.com/ishank09/data-extraction-service/pkg/mongodb"
 	"github.com/ishank09/data-extraction-service/pkg/msgraph"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/slok/go-http-metrics/metrics/prometheus"
@@ -96,6 +99,35 @@ func GetServerCmd() *cobra.Command {
 				log.Errorf("Failed to create msgraph handler: %v", err)
 			}
 
+			// Create MongoDB client and document service
+			mongoClient, documentService, err := createMongoDBClient(&cfg)
+			if err != nil {
+				log.Errorf("Failed to create MongoDB client: %v", err)
+				// Continue without MongoDB - not a critical failure
+			}
+
+			// Update pipeline handler with document service if MongoDB is available
+			if documentService != nil {
+				log.Infof("MongoDB integration enabled")
+				// Recreate pipeline handler with document service
+				handler, err = createPipelineHandlerWithMongoDB(&cfg, documentService)
+				if err != nil {
+					log.Errorf("Failed to recreate pipeline handler with MongoDB: %v", err)
+					return err
+				}
+			} else {
+				log.Infof("MongoDB integration disabled - documents will not be stored")
+			}
+
+			// Create document handler for MongoDB operations
+			var documentHandler *documenthandler.Handler
+			if documentService != nil {
+				documentConfig := &documenthandler.Config{
+					DocumentService: documentService,
+				}
+				documentHandler = documenthandler.New(documentConfig)
+			}
+
 			// ETL Pipeline routes
 			v1 := engine.Group("/api/v1")
 			v1.GET("/pipeline", handler.ExtractAllData, getMetricsMiddlewareHandler("GET /api/v1/pipeline", httpMetricsMiddlewareInstance))
@@ -103,6 +135,16 @@ func GetServerCmd() *cobra.Command {
 			v1.GET("/pipeline/type/:type", handler.ExtractDataByType, getMetricsMiddlewareHandler("GET /api/v1/pipeline/type/:type", httpMetricsMiddlewareInstance))
 			v1.GET("/sources", handler.GetSources, getMetricsMiddlewareHandler("GET /api/v1/sources", httpMetricsMiddlewareInstance))
 			v1.GET("/health", handler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/health", httpMetricsMiddlewareInstance))
+
+			// Document storage routes (if MongoDB is configured)
+			if documentHandler != nil {
+				documents := v1.Group("/documents")
+				documents.GET("", documentHandler.GetDocuments, getMetricsMiddlewareHandler("GET /api/v1/documents", httpMetricsMiddlewareInstance))
+				documents.GET("/collections", documentHandler.GetDocumentCollections, getMetricsMiddlewareHandler("GET /api/v1/documents/collections", httpMetricsMiddlewareInstance))
+				documents.GET("/stats", documentHandler.GetDocumentStats, getMetricsMiddlewareHandler("GET /api/v1/documents/stats", httpMetricsMiddlewareInstance))
+				documents.DELETE("/cleanup", documentHandler.DeleteOldDocuments, getMetricsMiddlewareHandler("DELETE /api/v1/documents/cleanup", httpMetricsMiddlewareInstance))
+				documents.GET("/health", documentHandler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/documents/health", httpMetricsMiddlewareInstance))
+			}
 
 			// OAuth routes for Microsoft Graph
 			if msgraphHandler != nil {
@@ -136,6 +178,15 @@ func GetServerCmd() *cobra.Command {
 			if os.Getenv("ENVIRONMENT_NAME") == localEnvironmentName {
 				addr = "localhost" + addr
 			}
+
+			// Cleanup MongoDB connection on shutdown
+			defer func() {
+				if mongoClient != nil {
+					if err := mongoClient.Disconnect(context.Background()); err != nil {
+						log.Errorf("Failed to disconnect from MongoDB: %v", err)
+					}
+				}
+			}()
 
 			err = engine.Run(addr)
 			if err != nil {
@@ -224,6 +275,90 @@ func createMSGraphHandler(cfg *Config) (*msgraphhandler.Handler, error) {
 	return nil, nil
 }
 
+// createMongoDBClient creates a MongoDB client and document service
+func createMongoDBClient(cfg *Config) (mongodb.Interface, *mongodb.DocumentService, error) {
+	// Check if MongoDB configuration is available
+	if cfg.MongoDB.URI == "" {
+		log.Infof("MongoDB not configured - skipping MongoDB initialization")
+		return nil, nil, nil
+	}
+
+	// Create MongoDB configuration
+	mongoConfig := mongodb.NewConfig()
+	mongoConfig.MongoDB.URI = cfg.MongoDB.URI
+
+	if cfg.MongoDB.Database != "" {
+		mongoConfig.MongoDB.Database = cfg.MongoDB.Database
+	} else {
+		mongoConfig.MongoDB.Database = "data_extraction_service" // Default database name
+	}
+
+	if cfg.MongoDB.Username != "" {
+		mongoConfig.MongoDB.Username = cfg.MongoDB.Username
+	}
+	if cfg.MongoDB.Password != "" {
+		mongoConfig.MongoDB.Password = cfg.MongoDB.Password
+	}
+	if cfg.MongoDB.AuthSource != "" {
+		mongoConfig.Security.AuthSource = cfg.MongoDB.AuthSource
+	}
+
+	// Create MongoDB client
+	mongoClient := mongodb.NewClient(mongoConfig)
+
+	// Connect to MongoDB
+	ctx := context.Background()
+	err := mongoClient.Connect(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+
+	// Test the connection
+	err = mongoClient.Ping(ctx)
+	if err != nil {
+		mongoClient.Disconnect(ctx)
+		return nil, nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+	}
+
+	log.Infof("Successfully connected to MongoDB at %s", cfg.MongoDB.URI)
+
+	// Create document service
+	documentService := mongodb.NewDocumentService(mongoClient)
+
+	return mongoClient, documentService, nil
+}
+
+// createPipelineHandlerWithMongoDB creates a pipeline handler with MongoDB integration
+func createPipelineHandlerWithMongoDB(cfg *Config, documentService *mongodb.DocumentService) (*pipelinehandler.Handler, error) {
+	// Check if MSGraph configuration is available
+	if cfg.MSGraph.ClientID != "" && cfg.MSGraph.ClientSecret != "" && cfg.MSGraph.TenantID != "" {
+		log.Infof("Creating pipeline handler with MSGraph and MongoDB integration")
+		log.Infof("OneNote concurrency: %d section workers, %d content workers", cfg.OneNote.MaxSectionWorkers, cfg.OneNote.MaxContentWorkers)
+
+		config := &pipelinehandler.Config{
+			MSGraphConfig: &msgraph.Config{
+				ClientID:     cfg.MSGraph.ClientID,
+				ClientSecret: cfg.MSGraph.ClientSecret,
+				TenantID:     cfg.MSGraph.TenantID,
+				OneNoteConcurrency: &msgraph.ConcurrencyConfig{
+					MaxSectionWorkers: cfg.OneNote.MaxSectionWorkers,
+					MaxContentWorkers: cfg.OneNote.MaxContentWorkers,
+				},
+			},
+			UserID:          cfg.MSGraph.UserID, // Pass user ID for application flow
+			DocumentService: documentService,    // Add MongoDB document service
+		}
+		return pipelinehandler.New(config)
+	}
+
+	// Fallback to static files with MongoDB
+	log.Infof("Creating pipeline handler with static files and MongoDB integration")
+	config := &pipelinehandler.Config{
+		DocumentService: documentService,
+	}
+	return pipelinehandler.New(config)
+}
+
 func getMetricsMiddlewareHandler(
 	handlerID string,
 	httpMetricsMiddlewareInstance httpMetricsMiddleware.Middleware,
@@ -262,6 +397,18 @@ func setCmdFlagsFromEnv(command *cobra.Command, cfg *Config) {
 	// Set OneNote concurrency configuration
 	cfg.OneNote.MaxSectionWorkers = int(env.ParseInt(OneNoteSectionWorkersEnvVar, 5))  // Default: 5 workers
 	cfg.OneNote.MaxContentWorkers = int(env.ParseInt(OneNoteContentWorkersEnvVar, 10)) // Default: 10 workers
+
+	// Set MongoDB configuration from environment variables
+	cfg.MongoDB.URI = os.Getenv(MongoDBURIEnvVar)
+	cfg.MongoDB.Database = os.Getenv(MongoDBDatabaseEnvVar)
+	cfg.MongoDB.Username = os.Getenv(MongoDBUsernameEnvVar)
+	cfg.MongoDB.Password = os.Getenv(MongoDBPasswordEnvVar)
+	cfg.MongoDB.AuthSource = os.Getenv(MongoDBAuthSourceEnvVar)
+
+	// Set default MongoDB URI if not provided
+	if cfg.MongoDB.URI == "" {
+		cfg.MongoDB.URI = "mongodb://localhost:27017" // Use the default from user's request
+	}
 }
 
 func testStatusCodeAlertHandler(c *gin.Context) {

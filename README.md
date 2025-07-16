@@ -115,11 +115,21 @@ go run cmd/main.go serve
 
 | Endpoint | Method | Description | Auth Required |
 |----------|--------|-------------|---------------|
-| `/api/v1/pipeline` | GET | Extract all data from available sources | Optional |
-| `/api/v1/pipeline/static` | GET | Extract static files only (CSV, PDF, etc.) | No |
-| `/api/v1/pipeline/msgraph` | GET | Extract OneNote data only | Yes |
-| `/api/v1/pipeline/type/{type}` | GET | Extract data filtered by file type | No |
+| `/api/v1/pipeline` | GET | Extract all data from available sources and store in MongoDB | Optional |
+| `/api/v1/pipeline/static` | GET | Extract static files only (CSV, PDF, etc.) and store | No |
+| `/api/v1/pipeline/msgraph` | GET | Extract OneNote data only and store | Yes |
+| `/api/v1/pipeline/type/{type}` | GET | Extract data filtered by file type and store | No |
 | `/api/v1/sources` | GET | Available data sources | No |
+
+### Document Storage Endpoints (MongoDB)
+
+| Endpoint | Method | Description | Query Parameters |
+|----------|--------|-------------|------------------|
+| `/api/v1/documents` | GET | Retrieve stored documents | `source`, `type`, `title`, `fetched_after`, `fetched_before`, `limit`, `skip` |
+| `/api/v1/documents/collections` | GET | Retrieve document collection metadata | `source`, `fetched_after`, `fetched_before`, `limit`, `skip` |
+| `/api/v1/documents/stats` | GET | Get document storage statistics | None |
+| `/api/v1/documents/cleanup` | DELETE | Delete old documents | `older_than` (duration, e.g., "720h") |
+| `/api/v1/documents/health` | GET | Document storage service health | None |
 
 ### Authentication Endpoints (OAuth)
 
@@ -140,11 +150,13 @@ go run cmd/main.go serve
 
 ## 📊 JSON Output Format
 
-All documents are transformed into a unified schema:
+All documents are transformed into a unified schema and automatically stored in MongoDB:
 
 ```json
 {
-  "source": "data_extraction_service",
+  "source": "etl_pipeline",
+  "fetched_at": "2024-01-01T00:00:00Z",
+  "schema_version": "v1",
   "documents": [
     {
       "id": "pdf_report_1234567890",
@@ -162,7 +174,13 @@ All documents are transformed into a unified schema:
         "page_count": 5
       }
     }
-  ]
+  ],
+  "document_count": 1,
+  "storage": {
+    "stored": true,
+    "collection_id": "507f1f77bcf86cd799439011",
+    "stored_documents": 1
+  }
 }
 ```
 
@@ -172,22 +190,33 @@ All documents are transformed into a unified schema:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PORT` | No | `8080` | Server port |
-| `ENVIRONMENT_NAME` | No | `local` | Environment identifier |
+| `PORT` | No | 8080 | Server port |
+| `ENVIRONMENT_NAME` | No | local | Environment name |
 
-### Microsoft Graph (Optional)
+#### Microsoft Graph Configuration
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MSGRAPH_CLIENT_ID` | No | - | Azure AD application client ID |
+| `MSGRAPH_CLIENT_SECRET` | No | - | Azure AD application client secret |
+| `MSGRAPH_TENANT_ID` | No | - | Azure AD tenant ID or "common" |
+| `MSGRAPH_USER_ID` | No | - | User ID for application flow |
 
-| Variable | Required | Description | Example |
-|----------|----------|-------------|---------|
-| `MSGRAPH_CLIENT_ID` | For MSGraph | Azure App Registration client ID | `12345678-1234-1234-1234-123456789012` |
-| `MSGRAPH_CLIENT_SECRET` | For MSGraph | Azure App Registration client secret | `abc123~DEF456.GHI789` |
-| `MSGRAPH_TENANT_ID` | For MSGraph | Tenant ID or "common" | `common` |
-| `OAUTH_REDIRECT_URI` | For OAuth | OAuth redirect URI | `http://localhost:8080/api/v1/oauth/callback` |
-| `OAUTH_SCOPES` | For OAuth | Comma-separated scopes | `User.Read,Files.Read,Notes.Read` |
-| `MSGRAPH_USER_ID` | No | Specific user for app flow | `user@domain.com` |
+#### OAuth Configuration  
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OAUTH_REDIRECT_URI` | No | - | OAuth redirect URI |
+| `OAUTH_SCOPES` | No | - | Comma-separated OAuth scopes |
 
-### Performance Tuning (OneNote)
+#### MongoDB Configuration
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MONGODB_URI` | No | mongodb://localhost:27017 | MongoDB connection URI |
+| `MONGODB_DATABASE` | No | data_extraction_service | Database name |
+| `MONGODB_USERNAME` | No | - | MongoDB username |
+| `MONGODB_PASSWORD` | No | - | MongoDB password |
+| `MONGODB_AUTH_SOURCE` | No | admin | Authentication database |
 
+#### Performance Tuning
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ONENOTE_SECTION_WORKERS` | No | `5` | Max concurrent section workers |

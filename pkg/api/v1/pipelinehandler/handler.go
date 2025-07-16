@@ -10,26 +10,34 @@ import (
 	"github.com/ishank09/data-extraction-service/internal/types"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/msgraphhandler"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/statichandler"
+	"github.com/ishank09/data-extraction-service/pkg/mongodb"
 	"github.com/ishank09/data-extraction-service/pkg/msgraph"
 	"github.com/ishank09/data-extraction-service/pkg/static"
 )
 
 // Handler handles ETL pipeline operations from multiple sources
 type Handler struct {
-	staticHandler  *statichandler.Handler
-	msgraphHandler *msgraphhandler.Handler
+	staticHandler   *statichandler.Handler
+	msgraphHandler  *msgraphhandler.Handler
+	documentService *mongodb.DocumentService
 }
 
 // Config represents the configuration for the pipeline handler
 type Config struct {
-	MSGraphConfig *msgraph.Config `json:"msgraph_config,omitempty"`
-	UserID        string          `json:"user_id,omitempty"` // Required for application flow when accessing user data
+	MSGraphConfig   *msgraph.Config          `json:"msgraph_config,omitempty"`
+	UserID          string                   `json:"user_id,omitempty"` // Required for application flow when accessing user data
+	DocumentService *mongodb.DocumentService `json:"document_service,omitempty"`
 }
 
 // New creates a new pipeline handler
 func New(config *Config) (*Handler, error) {
 	handler := &Handler{
 		staticHandler: statichandler.New(),
+	}
+
+	// Set document service if provided
+	if config != nil && config.DocumentService != nil {
+		handler.documentService = config.DocumentService
 	}
 
 	// Initialize msgraph handler if config is provided
@@ -54,6 +62,14 @@ func NewWithMSGraphClient(msgraphClient msgraph.Interface) *Handler {
 	return &Handler{
 		staticHandler:  statichandler.New(),
 		msgraphHandler: msgraphhandler.NewWithClient(msgraphClient),
+	}
+}
+
+// NewWithDocumentService creates a new handler with document service for testing
+func NewWithDocumentService(documentService *mongodb.DocumentService) *Handler {
+	return &Handler{
+		staticHandler:   statichandler.New(),
+		documentService: documentService,
 	}
 }
 
@@ -103,7 +119,16 @@ func (h *Handler) mergeDataCollections(staticData, msgraphData *types.DocumentCo
 	return masterCollection
 }
 
-// ExtractAllData returns data from all available sources
+// storeDocuments stores documents to MongoDB if document service is available
+func (h *Handler) storeDocuments(ctx context.Context, collection *types.DocumentCollection) (*mongodb.StoreCollectionResult, error) {
+	if h.documentService == nil {
+		return nil, nil // No error if document service is not configured
+	}
+
+	return h.documentService.StoreDocumentCollection(ctx, collection)
+}
+
+// ExtractAllData returns data from all available sources and stores to MongoDB
 func (h *Handler) ExtractAllData(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -149,17 +174,59 @@ func (h *Handler) ExtractAllData(c *gin.Context) {
 	// Merge data from both sources
 	mergedCollection := h.mergeDataCollections(staticData, msgraphData)
 
-	c.JSON(http.StatusOK, mergedCollection)
+	// Store documents to MongoDB
+	var storeResult *mongodb.StoreCollectionResult
+	if h.documentService != nil {
+		storeResult, err = h.storeDocuments(ctx, mergedCollection)
+		if err != nil {
+			// Log the error but don't fail the request
+			// The user still gets their processed data even if storage fails
+			c.Header("X-Storage-Warning", fmt.Sprintf("Failed to store documents: %v", err))
+		}
+	}
+
+	// Prepare response
+	response := gin.H{
+		"source":         mergedCollection.Source,
+		"fetched_at":     mergedCollection.FetchedAt,
+		"schema_version": mergedCollection.SchemaVersion,
+		"documents":      mergedCollection.Documents,
+		"document_count": len(mergedCollection.Documents),
+	}
+
+	// Add storage information if available
+	if storeResult != nil {
+		response["storage"] = gin.H{
+			"stored":           true,
+			"collection_id":    storeResult.CollectionID,
+			"stored_documents": storeResult.DocumentCount,
+		}
+	} else if h.documentService != nil {
+		response["storage"] = gin.H{
+			"stored": false,
+			"error":  "Failed to store documents",
+		}
+	} else {
+		response["storage"] = gin.H{
+			"stored": false,
+			"reason": "Document storage not configured",
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
-// ExtractDataBySource returns data from a specific source
+// ExtractDataBySource returns data from a specific source and stores to MongoDB
 func (h *Handler) ExtractDataBySource(c *gin.Context) {
 	source := c.Param("source")
 	ctx := c.Request.Context()
 
+	var collection *types.DocumentCollection
+	var err error
+
 	switch strings.ToLower(source) {
 	case "static":
-		collection, err := h.extractStaticData(ctx)
+		collection, err = h.extractStaticData(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "Failed to extract static data",
@@ -167,7 +234,6 @@ func (h *Handler) ExtractDataBySource(c *gin.Context) {
 			})
 			return
 		}
-		c.JSON(http.StatusOK, collection)
 
 	case "msgraph", "onenote":
 		// Check for Authorization header with Bearer token
@@ -176,7 +242,7 @@ func (h *Handler) ExtractDataBySource(c *gin.Context) {
 			// Extract token from Authorization header
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 
-			collection, err := h.extractMsgraphDataWithToken(ctx, token)
+			collection, err = h.extractMsgraphDataWithToken(ctx, token)
 			if err != nil {
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"error":   "Failed to extract msgraph data with provided token",
@@ -184,38 +250,76 @@ func (h *Handler) ExtractDataBySource(c *gin.Context) {
 				})
 				return
 			}
-			c.JSON(http.StatusOK, collection)
-			return
-		}
+		} else {
+			// Fall back to configured handler
+			if h.msgraphHandler == nil || !h.msgraphHandler.IsConfigured() {
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error":   "Microsoft Graph client not configured and no access token provided",
+					"message": "Either configure the service with client credentials or provide an Authorization header with Bearer token",
+				})
+				return
+			}
 
-		// Fall back to configured handler
-		if h.msgraphHandler == nil || !h.msgraphHandler.IsConfigured() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error":   "Microsoft Graph client not configured and no access token provided",
-				"message": "Either configure the service with client credentials or provide an Authorization header with Bearer token",
-			})
-			return
+			collection, err = h.extractMsgraphData(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "Failed to extract msgraph data",
+					"details": err.Error(),
+				})
+				return
+			}
 		}
-
-		collection, err := h.extractMsgraphData(ctx)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to extract msgraph data",
-				"details": err.Error(),
-			})
-			return
-		}
-		c.JSON(http.StatusOK, collection)
 
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":             "Invalid source",
 			"supported_sources": []string{"static", "msgraph", "onenote"},
 		})
+		return
 	}
+
+	// Store documents to MongoDB
+	var storeResult *mongodb.StoreCollectionResult
+	if h.documentService != nil {
+		storeResult, err = h.storeDocuments(ctx, collection)
+		if err != nil {
+			// Log the error but don't fail the request
+			c.Header("X-Storage-Warning", fmt.Sprintf("Failed to store documents: %v", err))
+		}
+	}
+
+	// Prepare response
+	response := gin.H{
+		"source":         collection.Source,
+		"fetched_at":     collection.FetchedAt,
+		"schema_version": collection.SchemaVersion,
+		"documents":      collection.Documents,
+		"document_count": len(collection.Documents),
+	}
+
+	// Add storage information if available
+	if storeResult != nil {
+		response["storage"] = gin.H{
+			"stored":           true,
+			"collection_id":    storeResult.CollectionID,
+			"stored_documents": storeResult.DocumentCount,
+		}
+	} else if h.documentService != nil {
+		response["storage"] = gin.H{
+			"stored": false,
+			"error":  "Failed to store documents",
+		}
+	} else {
+		response["storage"] = gin.H{
+			"stored": false,
+			"reason": "Document storage not configured",
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
-// ExtractDataByType returns data filtered by type from static source
+// ExtractDataByType returns data filtered by type from static source and stores to MongoDB
 func (h *Handler) ExtractDataByType(c *gin.Context) {
 	fileType := c.Param("type")
 	ctx := c.Request.Context()
@@ -236,7 +340,46 @@ func (h *Handler) ExtractDataByType(c *gin.Context) {
 		collection.AddDocument(doc)
 	}
 
-	c.JSON(http.StatusOK, collection)
+	// Store documents to MongoDB
+	var storeResult *mongodb.StoreCollectionResult
+	if h.documentService != nil {
+		storeResult, err = h.storeDocuments(ctx, collection)
+		if err != nil {
+			// Log the error but don't fail the request
+			c.Header("X-Storage-Warning", fmt.Sprintf("Failed to store documents: %v", err))
+		}
+	}
+
+	// Prepare response
+	response := gin.H{
+		"source":         collection.Source,
+		"fetched_at":     collection.FetchedAt,
+		"schema_version": collection.SchemaVersion,
+		"documents":      collection.Documents,
+		"document_count": len(collection.Documents),
+		"type_filter":    fileType,
+	}
+
+	// Add storage information if available
+	if storeResult != nil {
+		response["storage"] = gin.H{
+			"stored":           true,
+			"collection_id":    storeResult.CollectionID,
+			"stored_documents": storeResult.DocumentCount,
+		}
+	} else if h.documentService != nil {
+		response["storage"] = gin.H{
+			"stored": false,
+			"error":  "Failed to store documents",
+		}
+	} else {
+		response["storage"] = gin.H{
+			"stored": false,
+			"reason": "Document storage not configured",
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // GetSources returns information about available data sources
