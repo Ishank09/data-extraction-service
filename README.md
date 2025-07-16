@@ -497,3 +497,43 @@ The service logs performance metrics:
 **Made with ❤️ by [Ishank Vasania](https://github.com/ishank09)**
 
 *Transform your documents into structured JSON data effortlessly!*
+
+
+```mermaid
+graph TD
+    A["1. ResourcesController.java<br/>provisionUciResources()<br/>Line 296"] --> B["2. ProvisioningServiceImpl.java<br/>provisionUciResources()<br/>Line 56"]
+    
+    B --> C["3. ProvisioningTaskExecutor.java<br/>executeUciProvisioning()<br/>Line 35"]
+    
+    C --> D["4. ProvisionerTasksBuilder.java<br/>setUpUciProvisioningTasks()<br/>Line 196"]
+    
+    D --> E["5. VaultManagedNamespaceProvisioningTask.java<br/>execute()<br/>Line 46"]
+    
+    E --> F["6. VaultManagedNamespaceProvisioningServiceImpl.java<br/>provision()<br/>Line 32"]
+    
+    F --> G["7. ProvisioningInputsFetchImpl.java<br/>fetch()<br/>Line 21<br/>🔸 FIRST CALL"]
+    G --> G1["initializeInputsFromSnowSr()<br/>Line 46"]
+    G1 --> G2["snowIdService.getServiceDetails()<br/>Gets service ID from SNOW"]
+    G --> G3["Set hardcoded values:<br/>- vaultNamespaceName<br/>- tfeWorkspaceName<br/>- tfeWorkspaceId"]
+    
+    G --> H["8. ProvisioningAuthorizationCheckImpl.java<br/>isAuthorized()<br/>Line 31<br/>🔸 SECOND CALL"]
+    H --> H1["fetchUserNamespaceMapping()<br/>Line 88"]
+    H1 --> H2["HTTP call to Artifactory<br/>Get user-namespace mapping"]
+    H --> H3["Check if committer has access<br/>to vault namespace"]
+    
+    H --> I["9. ProvisioningTriggerImpl.java<br/>trigger()<br/>Line 56<br/>🔸 THIRD CALL"]
+    I --> I1["updateCiV1Yaml()<br/>Line 73"]
+    I1 --> I2["getExistingYamlContent()<br/>Read pmm/ci_v1.yaml"]
+    I1 --> I3["updateYamlContent()<br/>Add serviceId + environments"]
+    I1 --> I4["performGitOperations()<br/>Create branch, commit, PR, merge"]
+    I4 --> I5["Store merge commit SHA<br/>in inputs.githubMergeCommitSha"]
+    
+    I --> J["10. ProvisioningStatusCheckImpl.java<br/>provisioningStatus()<br/>Line 90<br/>🔸 FOURTH CALL (if trigger SUCCESS)"]
+    J --> J1["Check Terraform Enterprise<br/>workspace status using<br/>tfeWorkspaceId + mergeCommitSha"]
+    
+    style F fill:#fff3e0,stroke:#ff9800,stroke-width:3px
+    style G fill:#e8f5e8,stroke:#4caf50,stroke-width:2px
+    style H fill:#fce4ec,stroke:#e91e63,stroke-width:2px
+    style I fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
+    style J fill:#fff8e1,stroke:#ffc107,stroke-width:2px
+```
