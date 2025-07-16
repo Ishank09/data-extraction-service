@@ -1,1 +1,439 @@
-# data-extraction-service
+# Data Extraction Service
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-%3E%3D1.24.1-blue)](https://golang.org/)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/ishank09/data-extraction-service)
+
+A powerful, open-source **ETL (Extract, Transform, Load) service** built in Go that converts documents from multiple data sources into unified JSON format. Extract content from static files and Microsoft Graph OneNote notebooks, transform them into consistent JSON structure, and serve through a modern REST API.
+
+## 🌟 Features
+
+- **🔄 Universal File Converter**: Transform CSV, PDF, TXT, XML, HTML, JSON, and OneNote files into structured JSON
+- **📁 Embedded File Processing**: Works out-of-the-box with embedded static files 
+- **🔧 Extensible Architecture**: Easy to add new file types and data sources
+- **☁️ Microsoft Graph Integration**: Optional OneNote and Office 365 document access
+- **🔒 OAuth 2.0 Authentication**: Secure Microsoft Graph integration
+- **🌐 RESTful API**: Clean, documented endpoints for easy integration
+- **🎯 Zero Configuration**: Works without any setup for static files
+- **🔀 Flexible Deployment**: Static-only mode or full Microsoft Graph integration
+- **🏢 Multi-tenant Support**: Personal and organizational Microsoft accounts
+
+## 🚀 Quick Start
+
+### Option 1: Static Files Only (No Setup Required)
+
+```bash
+# Clone the repository
+git clone https://github.com/ishank09/data-extraction-service.git
+cd data-extraction-service
+
+# Install dependencies
+go mod tidy
+
+# Start the service
+go run cmd/main.go serve
+```
+
+Visit `http://localhost:8080/api/v1/documents` to see your embedded files converted to JSON!
+
+### Option 2: With Microsoft Graph Integration
+
+1. **Set up Azure App Registration** (see [detailed instructions](#-azure-app-registration))
+2. **Configure environment variables**:
+```bash
+export MSGRAPH_CLIENT_ID="your-client-id"
+export MSGRAPH_CLIENT_SECRET="your-client-secret"
+export MSGRAPH_TENANT_ID="common"
+export OAUTH_REDIRECT_URI="http://localhost:8080/api/v1/oauth/callback"
+export OAUTH_SCOPES="User.Read,Files.Read,Notes.Read,offline_access"
+```
+3. **Start the service**:
+```bash
+go run cmd/main.go serve
+```
+
+## 📁 Adding Your Own Files
+
+The service uses Go's embed functionality to include files at compile time. Add your files to the appropriate directories:
+
+### 📂 File Locations
+
+```
+pkg/static/
+├── csv/files/          # Add your .csv files here
+├── json/files/         # Add your .json files here  
+├── txt/files/          # Add your .txt files here
+├── pdf/files/          # Add your .pdf files here
+├── html/files/         # Add your .html files here
+└── xml/files/          # Add your .xml files here
+```
+
+### 📝 Example: Adding Files
+
+```bash
+# Add your CSV data
+cp my-data.csv pkg/static/csv/files/
+
+# Add your PDFs
+cp report.pdf pkg/static/pdf/files/
+
+# Add your text files  
+cp notes.txt pkg/static/txt/files/
+
+# Rebuild and restart
+go run cmd/main.go serve
+```
+
+**Important**: After adding files, restart the service as files are embedded at compile time.
+
+## 🏗️ ETL Architecture
+
+### Extract Phase
+- **Static Files**: Embedded files using Go's `//go:embed` directive
+- **Microsoft Graph**: OneNote notebooks and pages via Graph API
+- **File Types**: CSV, JSON, TXT, PDF, XML, HTML, OneNote
+
+### Transform Phase
+- **Content Parsing**: 
+  - **CSV** → Structured rows and columns
+  - **PDF** → Extracted text using go-fitz
+  - **HTML** → Clean text extraction
+  - **XML** → Parsed structure
+  - **OneNote** → Rich content with metadata
+- **Schema Normalization**: Unified document structure
+- **JSON Serialization**: Consistent output format
+
+### Load Phase
+- **REST API**: JSON documents via HTTP endpoints
+- **Real-time Processing**: On-demand transformation
+- **Structured Metadata**: Rich document information
+
+## 🔌 API Reference
+
+### Core Endpoints
+
+| Endpoint | Method | Description | Auth Required |
+|----------|--------|-------------|---------------|
+| `/api/v1/documents` | GET | All transformed documents as JSON | Optional |
+| `/api/v1/documents/static` | GET | Static files only (CSV, PDF, etc.) | No |
+| `/api/v1/documents/msgraph` | GET | OneNote documents only | Yes |
+| `/api/v1/documents/type/{type}` | GET | Filter by file type | No |
+| `/api/v1/sources` | GET | Available data sources | No |
+
+### Authentication Endpoints (OAuth)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/oauth/authorize` | POST | Get authorization URL |
+| `/api/v1/oauth/callback` | GET | OAuth callback |
+| `/api/v1/oauth/refresh` | POST | Refresh access token |
+| `/api/v1/oauth/test` | POST | Validate token |
+
+### Monitoring
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/health` | GET | Service health status |
+| `/ping` | GET | Basic ping |
+| `/metrics` | GET | Prometheus metrics |
+
+## 📊 JSON Output Format
+
+All documents are transformed into a unified schema:
+
+```json
+{
+  "source": "data_extraction_service",
+  "documents": [
+    {
+      "id": "pdf_report_1234567890",
+      "title": "quarterly-report.pdf",
+      "content": "Extracted text content from PDF...",
+      "source": "embedded",
+      "type": "pdf",
+      "location": "files/quarterly-report.pdf",
+      "created_at": "2024-01-01T00:00:00Z",
+      "fetched_at": "2024-01-01T00:00:00Z",
+      "metadata": {
+        "filename": "quarterly-report.pdf",
+        "file_type": "pdf",
+        "word_count": 1250,
+        "page_count": 5
+      }
+    }
+  ]
+}
+```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `8080` | Server port |
+| `ENVIRONMENT_NAME` | No | `local` | Environment identifier |
+
+### Microsoft Graph (Optional)
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `MSGRAPH_CLIENT_ID` | For MSGraph | Azure App Registration client ID | `12345678-1234-1234-1234-123456789012` |
+| `MSGRAPH_CLIENT_SECRET` | For MSGraph | Azure App Registration client secret | `abc123~DEF456.GHI789` |
+| `MSGRAPH_TENANT_ID` | For MSGraph | Tenant ID or "common" | `common` |
+| `OAUTH_REDIRECT_URI` | For OAuth | OAuth redirect URI | `http://localhost:8080/api/v1/oauth/callback` |
+| `OAUTH_SCOPES` | For OAuth | Comma-separated scopes | `User.Read,Files.Read,Notes.Read` |
+| `MSGRAPH_USER_ID` | No | Specific user for app flow | `user@domain.com` |
+
+### 🔐 Azure App Registration
+
+#### 1. Create App Registration
+1. Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations**
+2. Click **New registration**
+3. Configure:
+   - **Name**: `data-extraction-service`
+   - **Account types**: Choose based on your needs:
+     - Personal accounts: "Personal Microsoft accounts only"
+     - Work/School: "Accounts in this organizational directory only"
+     - Both: "Accounts in any organizational directory and personal Microsoft accounts"
+   - **Redirect URI**: `http://localhost:8080/api/v1/oauth/callback`
+
+#### 2. Get Credentials
+- **Client ID**: Copy from Overview → Application (client) ID
+- **Client Secret**: Certificates & secrets → New client secret → Copy **Value**
+- **Tenant ID**: Copy from Overview → Directory (tenant) ID
+
+#### 3. Configure Permissions
+Add these Microsoft Graph permissions:
+- `User.Read` - Read user profile
+- `Files.Read` - Read user files  
+- `Notes.Read` - Read OneNote notebooks
+- `offline_access` - Refresh tokens
+
+## 🛠️ Development
+
+### Build Commands
+
+```bash
+# Build binary
+make build
+
+# Run tests
+make test
+
+# Test with coverage
+make test-coverage
+
+# Run linter
+make lint
+
+# Clean artifacts
+make clean
+
+# Install dependencies
+make deps
+
+# Generate mocks
+make mocks
+```
+
+### Development Server
+
+```bash
+# Development mode with auto-reload
+make dev
+
+# With verbose logging
+go run cmd/main.go serve --verbose
+```
+
+## 🔧 Usage Patterns
+
+### 1. Static Files Only
+Perfect for processing embedded documents without external dependencies:
+
+```bash
+# No environment variables needed
+go run cmd/main.go serve
+
+# Access all documents
+curl http://localhost:8080/api/v1/documents
+
+# Access specific file types
+curl http://localhost:8080/api/v1/documents/type/pdf
+```
+
+### 2. Microsoft Graph Integration
+Process OneNote documents alongside static files:
+
+```bash
+# Set MSGraph environment variables
+export MSGRAPH_CLIENT_ID="your-client-id"
+export MSGRAPH_CLIENT_SECRET="your-client-secret"
+export MSGRAPH_TENANT_ID="common"
+
+# Start service
+go run cmd/main.go serve
+
+# Get authorization URL
+curl -X POST http://localhost:8080/api/v1/oauth/authorize
+
+# After OAuth flow, access documents with token
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+     http://localhost:8080/api/v1/documents
+```
+
+### 3. Hybrid Mode
+Best of both worlds - static files work immediately, MSGraph when configured:
+
+```bash
+# Works with or without MSGraph configuration
+go run cmd/main.go serve
+
+# Returns static files immediately
+# Returns OneNote documents if MSGraph is configured
+curl http://localhost:8080/api/v1/documents
+```
+
+## 📖 API Examples
+
+### Get All Documents
+```bash
+curl http://localhost:8080/api/v1/documents
+```
+
+### Get Static Files Only
+```bash
+curl http://localhost:8080/api/v1/documents/static
+```
+
+### Get OneNote Documents (with authentication)
+```bash
+curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+     http://localhost:8080/api/v1/documents/msgraph
+```
+
+### Filter by File Type
+```bash
+# Get only PDF documents
+curl http://localhost:8080/api/v1/documents/type/pdf
+
+# Get only CSV documents  
+curl http://localhost:8080/api/v1/documents/type/csv
+```
+
+### Check Available Sources
+```bash
+curl http://localhost:8080/api/v1/sources
+```
+
+## 🔍 Supported File Types
+
+| Type | Extensions | Processing | Output |
+|------|------------|------------|---------|
+| **CSV** | `.csv` | Parse rows/columns | Structured JSON data |
+| **PDF** | `.pdf` | Text extraction (go-fitz) | Plain text content |
+| **TXT** | `.txt` | Direct content | Raw text |
+| **HTML** | `.html`, `.htm` | Clean text extraction | Stripped content |
+| **XML** | `.xml` | Structure parsing | Parsed elements |
+| **JSON** | `.json` | Validation & normalization | Structured data |
+| **OneNote** | N/A | Rich content extraction | Formatted content |
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+#### "No documents found"
+- **Cause**: No files in static directories
+- **Solution**: Add files to `pkg/static/*/files/` and restart
+
+#### "MSGraph handler not configured"  
+- **Cause**: Missing environment variables
+- **Solution**: Either set MSGraph variables or use static-only mode
+
+#### "Access token invalid"
+- **Cause**: Expired or invalid OAuth token
+- **Solution**: Refresh token via `/api/v1/oauth/refresh`
+
+#### "PDF extraction failed"
+- **Cause**: Corrupted or password-protected PDF
+- **Solution**: Document will still appear with metadata
+
+### Debug Mode
+```bash
+# Enable verbose logging
+ENVIRONMENT_NAME=local go run cmd/main.go serve --verbose
+
+# Check health status
+curl http://localhost:8080/api/v1/health
+
+# Verify available sources
+curl http://localhost:8080/api/v1/sources
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Here's how to get started:
+
+1. **Fork** the repository
+2. **Create** a feature branch: `git checkout -b feature/amazing-feature`
+3. **Add** your files to appropriate directories
+4. **Test** your changes: `make test`
+5. **Commit** your changes: `git commit -m 'Add amazing feature'`
+6. **Push** to the branch: `git push origin feature/amazing-feature`
+7. **Open** a Pull Request
+
+### Development Setup
+```bash
+# Install development tools
+make install-lint
+make install-mockery
+
+# Run full test suite
+make check
+
+# Generate test coverage
+make test-coverage
+```
+
+## 📦 Docker Deployment
+
+```dockerfile
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go mod download
+RUN go build -o data-extraction-service cmd/main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/data-extraction-service .
+CMD ["./data-extraction-service", "serve"]
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🌟 Why This Project?
+
+- **🎯 Simplicity**: Works out-of-the-box with embedded files
+- **🔧 Flexibility**: Optional cloud integration 
+- **🚀 Performance**: Efficient Go-based processing
+- **📖 Extensibility**: Easy to add new file types
+- **🔓 Open Source**: MIT licensed, community-driven
+- **🏢 Production Ready**: Monitoring, logging, testing included
+
+## 📚 Resources
+
+- [Go Documentation](https://golang.org/doc/)
+- [Microsoft Graph API](https://docs.microsoft.com/en-us/graph/)
+- [Azure App Registration Guide](https://docs.microsoft.com/en-us/azure/active-directory/develop/quickstart-register-app)
+- [OAuth 2.0 Authorization Code Flow](https://docs.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-auth-code-flow)
+
+---
+
+**Made with ❤️ by [Ishank Vasania](https://github.com/ishank09)**
+
+*Transform your documents into structured JSON data effortlessly!*
