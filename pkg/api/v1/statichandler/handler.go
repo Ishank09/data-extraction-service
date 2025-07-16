@@ -19,8 +19,8 @@ func New() *Handler {
 	}
 }
 
-// GetAllDocuments returns all static documents
-func (h *Handler) GetAllDocuments(c *gin.Context) {
+// ExtractAllData returns all static documents
+func (h *Handler) ExtractAllData(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	collection, err := h.staticClient.GetAllDataAsJSON(ctx)
@@ -35,8 +35,8 @@ func (h *Handler) GetAllDocuments(c *gin.Context) {
 	c.JSON(http.StatusOK, collection)
 }
 
-// GetDocumentsByType returns documents filtered by type
-func (h *Handler) GetDocumentsByType(c *gin.Context) {
+// ExtractDataByType returns data filtered by type
+func (h *Handler) ExtractDataByType(c *gin.Context) {
 	fileType := c.Param("type")
 	ctx := c.Request.Context()
 

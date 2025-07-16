@@ -163,7 +163,7 @@ func TestHandler_GetDocuments_NotConfigured(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestHandler_GetAllDocuments(t *testing.T) {
+func TestHandler_ExtractAllData(t *testing.T) {
 	tests := []struct {
 		name           string
 		setupMock      func(*MockMSGraphClient)
@@ -206,9 +206,9 @@ func TestHandler_GetAllDocuments(t *testing.T) {
 			}
 
 			router := setupRouter()
-			router.GET("/documents", handler.GetAllDocuments)
+			router.GET("/pipeline", handler.ExtractAllData)
 
-			req := httptest.NewRequest(http.MethodGet, "/documents", nil)
+			req := httptest.NewRequest(http.MethodGet, "/pipeline", nil)
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)

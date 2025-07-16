@@ -12,9 +12,9 @@ import (
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
 	"github.com/ishank09/data-extraction-service/cmd/server/env"
-	"github.com/ishank09/data-extraction-service/pkg/api/v1/dataextractionhandler"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/health"
 	"github.com/ishank09/data-extraction-service/pkg/api/v1/msgraphhandler"
+	"github.com/ishank09/data-extraction-service/pkg/api/v1/pipelinehandler"
 	"github.com/ishank09/data-extraction-service/pkg/logging"
 	"github.com/ishank09/data-extraction-service/pkg/msgraph"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -83,10 +83,10 @@ func GetServerCmd() *cobra.Command {
 				getMetricsMiddlewareHandler("GET /ping", httpMetricsMiddlewareInstance),
 			)
 
-			// Create data extraction handler
-			handler, err := createDataExtractionHandler(&cfg)
+			// Create ETL pipeline handler
+			handler, err := createPipelineHandler(&cfg)
 			if err != nil {
-				log.Errorf("Failed to create data extraction handler: %v", err)
+				log.Errorf("Failed to create pipeline handler: %v", err)
 				return err
 			}
 
@@ -96,11 +96,11 @@ func GetServerCmd() *cobra.Command {
 				log.Errorf("Failed to create msgraph handler: %v", err)
 			}
 
-			// Data extraction routes
+			// ETL Pipeline routes
 			v1 := engine.Group("/api/v1")
-			v1.GET("/documents", handler.GetAllDocuments, getMetricsMiddlewareHandler("GET /api/v1/documents", httpMetricsMiddlewareInstance))
-			v1.GET("/documents/:source", handler.GetDocumentsBySource, getMetricsMiddlewareHandler("GET /api/v1/documents/:source", httpMetricsMiddlewareInstance))
-			v1.GET("/documents/type/:type", handler.GetDocumentsByType, getMetricsMiddlewareHandler("GET /api/v1/documents/type/:type", httpMetricsMiddlewareInstance))
+			v1.GET("/pipeline", handler.ExtractAllData, getMetricsMiddlewareHandler("GET /api/v1/pipeline", httpMetricsMiddlewareInstance))
+			v1.GET("/pipeline/:source", handler.ExtractDataBySource, getMetricsMiddlewareHandler("GET /api/v1/pipeline/:source", httpMetricsMiddlewareInstance))
+			v1.GET("/pipeline/type/:type", handler.ExtractDataByType, getMetricsMiddlewareHandler("GET /api/v1/pipeline/type/:type", httpMetricsMiddlewareInstance))
 			v1.GET("/sources", handler.GetSources, getMetricsMiddlewareHandler("GET /api/v1/sources", httpMetricsMiddlewareInstance))
 			v1.GET("/health", handler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/health", httpMetricsMiddlewareInstance))
 
@@ -114,7 +114,7 @@ func GetServerCmd() *cobra.Command {
 
 				// MSGraph routes
 				msgraph := v1.Group("/msgraph")
-				msgraph.GET("/documents", msgraphHandler.GetAllDocuments, getMetricsMiddlewareHandler("GET /api/v1/msgraph/documents", httpMetricsMiddlewareInstance))
+				msgraph.GET("/pipeline", msgraphHandler.ExtractAllData, getMetricsMiddlewareHandler("GET /api/v1/msgraph/pipeline", httpMetricsMiddlewareInstance))
 				msgraph.GET("/health", msgraphHandler.GetHealth, getMetricsMiddlewareHandler("GET /api/v1/msgraph/health", httpMetricsMiddlewareInstance))
 			}
 
@@ -147,14 +147,14 @@ func GetServerCmd() *cobra.Command {
 	}
 }
 
-// createDataExtractionHandler creates a data extraction handler with MSGraph configuration from environment variables
-func createDataExtractionHandler(cfg *Config) (*dataextractionhandler.Handler, error) {
+// createPipelineHandler creates a pipeline handler with MSGraph configuration from environment variables
+func createPipelineHandler(cfg *Config) (*pipelinehandler.Handler, error) {
 	// Check if MSGraph configuration is available
 	if cfg.MSGraph.ClientID != "" && cfg.MSGraph.ClientSecret != "" && cfg.MSGraph.TenantID != "" {
-		log.Infof("Creating data extraction handler with MSGraph integration")
+		log.Infof("Creating pipeline handler with MSGraph integration")
 		log.Infof("OneNote concurrency: %d section workers, %d content workers", cfg.OneNote.MaxSectionWorkers, cfg.OneNote.MaxContentWorkers)
 
-		config := &dataextractionhandler.Config{
+		config := &pipelinehandler.Config{
 			MSGraphConfig: &msgraph.Config{
 				ClientID:     cfg.MSGraph.ClientID,
 				ClientSecret: cfg.MSGraph.ClientSecret,
@@ -166,12 +166,12 @@ func createDataExtractionHandler(cfg *Config) (*dataextractionhandler.Handler, e
 			},
 			UserID: cfg.MSGraph.UserID, // Pass user ID for application flow
 		}
-		return dataextractionhandler.New(config)
+		return pipelinehandler.New(config)
 	}
 
 	// Fallback to static files only
-	log.Infof("Creating data extraction handler with static files only (MSGraph not configured)")
-	return dataextractionhandler.New(nil)
+	log.Infof("Creating pipeline handler with static files only (MSGraph not configured)")
+	return pipelinehandler.New(nil)
 }
 
 // createMSGraphHandler creates a msgraph handler with OAuth configuration

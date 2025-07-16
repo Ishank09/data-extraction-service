@@ -35,7 +35,7 @@ go mod tidy
 go run cmd/main.go serve
 ```
 
-Visit `http://localhost:8080/api/v1/documents` to see your embedded files converted to JSON!
+Visit `http://localhost:8080/api/v1/pipeline` to see your embedded files converted to JSON!
 
 ### Option 2: With Microsoft Graph Integration
 
@@ -115,10 +115,10 @@ go run cmd/main.go serve
 
 | Endpoint | Method | Description | Auth Required |
 |----------|--------|-------------|---------------|
-| `/api/v1/documents` | GET | All transformed documents as JSON | Optional |
-| `/api/v1/documents/static` | GET | Static files only (CSV, PDF, etc.) | No |
-| `/api/v1/documents/msgraph` | GET | OneNote documents only | Yes |
-| `/api/v1/documents/type/{type}` | GET | Filter by file type | No |
+| `/api/v1/pipeline` | GET | Extract all data from available sources | Optional |
+| `/api/v1/pipeline/static` | GET | Extract static files only (CSV, PDF, etc.) | No |
+| `/api/v1/pipeline/msgraph` | GET | Extract OneNote data only | Yes |
+| `/api/v1/pipeline/type/{type}` | GET | Extract data filtered by file type | No |
 | `/api/v1/sources` | GET | Available data sources | No |
 
 ### Authentication Endpoints (OAuth)
@@ -264,11 +264,11 @@ Perfect for processing embedded documents without external dependencies:
 # No environment variables needed
 go run cmd/main.go serve
 
-# Access all documents
-curl http://localhost:8080/api/v1/documents
+# Extract all data
+curl http://localhost:8080/api/v1/pipeline
 
-# Access specific file types
-curl http://localhost:8080/api/v1/documents/type/pdf
+# Extract specific file types
+curl http://localhost:8080/api/v1/pipeline/type/pdf
 ```
 
 ### 2. Microsoft Graph Integration
@@ -286,9 +286,9 @@ go run cmd/main.go serve
 # Get authorization URL
 curl -X POST http://localhost:8080/api/v1/oauth/authorize
 
-# After OAuth flow, access documents with token
+# After OAuth flow, extract data with token
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-     http://localhost:8080/api/v1/documents
+     http://localhost:8080/api/v1/pipeline
 ```
 
 ### 3. Hybrid Mode
@@ -299,35 +299,35 @@ Best of both worlds - static files work immediately, MSGraph when configured:
 go run cmd/main.go serve
 
 # Returns static files immediately
-# Returns OneNote documents if MSGraph is configured
-curl http://localhost:8080/api/v1/documents
+# Returns OneNote data if MSGraph is configured
+curl http://localhost:8080/api/v1/pipeline
 ```
 
 ## 📖 API Examples
 
-### Get All Documents
+### Extract All Data
 ```bash
-curl http://localhost:8080/api/v1/documents
+curl http://localhost:8080/api/v1/pipeline
 ```
 
-### Get Static Files Only
+### Extract Static Files Only
 ```bash
-curl http://localhost:8080/api/v1/documents/static
+curl http://localhost:8080/api/v1/pipeline/static
 ```
 
-### Get OneNote Documents (with authentication)
+### Extract OneNote Data (with authentication)
 ```bash
 curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-     http://localhost:8080/api/v1/documents/msgraph
+     http://localhost:8080/api/v1/pipeline/msgraph
 ```
 
 ### Filter by File Type
 ```bash
-# Get only PDF documents
-curl http://localhost:8080/api/v1/documents/type/pdf
+# Extract only PDF data
+curl http://localhost:8080/api/v1/pipeline/type/pdf
 
-# Get only CSV documents  
-curl http://localhost:8080/api/v1/documents/type/csv
+# Extract only CSV data  
+curl http://localhost:8080/api/v1/pipeline/type/csv
 ```
 
 ### Check Available Sources
@@ -498,42 +498,3 @@ The service logs performance metrics:
 
 *Transform your documents into structured JSON data effortlessly!*
 
-
-```mermaid
-graph TD
-    A["1. ResourcesController.java<br/>provisionUciResources()<br/>Line 296"] --> B["2. ProvisioningServiceImpl.java<br/>provisionUciResources()<br/>Line 56"]
-    
-    B --> C["3. ProvisioningTaskExecutor.java<br/>executeUciProvisioning()<br/>Line 35"]
-    
-    C --> D["4. ProvisionerTasksBuilder.java<br/>setUpUciProvisioningTasks()<br/>Line 196"]
-    
-    D --> E["5. VaultManagedNamespaceProvisioningTask.java<br/>execute()<br/>Line 46"]
-    
-    E --> F["6. VaultManagedNamespaceProvisioningServiceImpl.java<br/>provision()<br/>Line 32"]
-    
-    F --> G["7. ProvisioningInputsFetchImpl.java<br/>fetch()<br/>Line 21<br/>🔸 FIRST CALL"]
-    G --> G1["initializeInputsFromSnowSr()<br/>Line 46"]
-    G1 --> G2["snowIdService.getServiceDetails()<br/>Gets service ID from SNOW"]
-    G --> G3["Set hardcoded values:<br/>- vaultNamespaceName<br/>- tfeWorkspaceName<br/>- tfeWorkspaceId"]
-    
-    G --> H["8. ProvisioningAuthorizationCheckImpl.java<br/>isAuthorized()<br/>Line 31<br/>🔸 SECOND CALL"]
-    H --> H1["fetchUserNamespaceMapping()<br/>Line 88"]
-    H1 --> H2["HTTP call to Artifactory<br/>Get user-namespace mapping"]
-    H --> H3["Check if committer has access<br/>to vault namespace"]
-    
-    H --> I["9. ProvisioningTriggerImpl.java<br/>trigger()<br/>Line 56<br/>🔸 THIRD CALL"]
-    I --> I1["updateCiV1Yaml()<br/>Line 73"]
-    I1 --> I2["getExistingYamlContent()<br/>Read pmm/ci_v1.yaml"]
-    I1 --> I3["updateYamlContent()<br/>Add serviceId + environments"]
-    I1 --> I4["performGitOperations()<br/>Create branch, commit, PR, merge"]
-    I4 --> I5["Store merge commit SHA<br/>in inputs.githubMergeCommitSha"]
-    
-    I --> J["10. ProvisioningStatusCheckImpl.java<br/>provisioningStatus()<br/>Line 90<br/>🔸 FOURTH CALL (if trigger SUCCESS)"]
-    J --> J1["Check Terraform Enterprise<br/>workspace status using<br/>tfeWorkspaceId + mergeCommitSha"]
-    
-    style F fill:#fff3e0,stroke:#ff9800,stroke-width:3px
-    style G fill:#e8f5e8,stroke:#4caf50,stroke-width:2px
-    style H fill:#fce4ec,stroke:#e91e63,stroke-width:2px
-    style I fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
-    style J fill:#fff8e1,stroke:#ffc107,stroke-width:2px
-```

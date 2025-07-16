@@ -12,7 +12,7 @@ The server will start on `http://localhost:8080`
 
 ### OAuth Flow
 - `POST /api/v1/oauth/authorize` - Get authorization URL
-- `GET /api/v1/documents` - Get documents (requires Authorization header)
+- `GET /api/v1/pipeline` - Extract data (requires Authorization header)
 
 ### Health Check
 - `GET /api/v1/health` - Health status

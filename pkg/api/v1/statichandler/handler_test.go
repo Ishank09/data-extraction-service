@@ -20,12 +20,12 @@ func TestNew(t *testing.T) {
 	assert.NotNil(t, handler.staticClient)
 }
 
-func TestHandler_GetAllDocuments(t *testing.T) {
+func TestHandler_ExtractAllData(t *testing.T) {
 	handler := New()
 	router := setupRouter()
-	router.GET("/documents", handler.GetAllDocuments)
+	router.GET("/pipeline", handler.ExtractAllData)
 
-	req := httptest.NewRequest(http.MethodGet, "/documents", nil)
+	req := httptest.NewRequest(http.MethodGet, "/pipeline", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -35,7 +35,7 @@ func TestHandler_GetAllDocuments(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "source")
 }
 
-func TestHandler_GetDocumentsByType(t *testing.T) {
+func TestHandler_ExtractDataByType(t *testing.T) {
 	tests := []struct {
 		name           string
 		fileType       string
@@ -62,9 +62,9 @@ func TestHandler_GetDocumentsByType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := New()
 			router := setupRouter()
-			router.GET("/documents/type/:type", handler.GetDocumentsByType)
+			router.GET("/pipeline/type/:type", handler.ExtractDataByType)
 
-			req := httptest.NewRequest(http.MethodGet, "/documents/type/"+tt.fileType, nil)
+			req := httptest.NewRequest(http.MethodGet, "/pipeline/type/"+tt.fileType, nil)
 			w := httptest.NewRecorder()
 
 			router.ServeHTTP(w, req)

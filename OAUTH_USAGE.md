@@ -27,13 +27,13 @@ After hitting the authorization URL, you'll get a response like:
 }
 ```
 
-### 3. Use Access Token to Get Documents
+### 3. Use Access Token to Extract Data
 
-From the response above, take the `access_token` and call the `/documents` API:
+From the response above, take the `access_token` and call the `/pipeline` API:
 
 ```bash
-curl --location 'http://localhost:8080/api/v1/documents' \
+curl --location 'http://localhost:8080/api/v1/pipeline' \
 --header 'Authorization: Bearer YOUR_ACCESS_TOKEN_HERE'
 ```
 
-That's it! You now have access to the documents through the OAuth flow. 
+That's it! You now have access to extract data through the OAuth flow. 

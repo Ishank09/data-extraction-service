@@ -123,8 +123,8 @@ func (h *Handler) GetDocuments(ctx context.Context) (*types.DocumentCollection, 
 	return h.msgraphClient.GetOneNoteDataAsJSON(ctx)
 }
 
-// GetAllDocuments returns all OneNote documents
-func (h *Handler) GetAllDocuments(c *gin.Context) {
+// ExtractAllData returns all OneNote documents
+func (h *Handler) ExtractAllData(c *gin.Context) {
 	// Check for Authorization header with Bearer token
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {

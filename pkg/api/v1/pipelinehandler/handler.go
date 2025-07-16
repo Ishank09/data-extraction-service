@@ -1,4 +1,4 @@
-package dataextractionhandler
+package pipelinehandler
 
 import (
 	"context"
@@ -14,19 +14,19 @@ import (
 	"github.com/ishank09/data-extraction-service/pkg/static"
 )
 
-// Handler handles data extraction from multiple sources
+// Handler handles ETL pipeline operations from multiple sources
 type Handler struct {
 	staticHandler  *statichandler.Handler
 	msgraphHandler *msgraphhandler.Handler
 }
 
-// Config represents the configuration for the data extraction handler
+// Config represents the configuration for the pipeline handler
 type Config struct {
 	MSGraphConfig *msgraph.Config `json:"msgraph_config,omitempty"`
 	UserID        string          `json:"user_id,omitempty"` // Required for application flow when accessing user data
 }
 
-// New creates a new data extraction handler
+// New creates a new pipeline handler
 func New(config *Config) (*Handler, error) {
 	handler := &Handler{
 		staticHandler: statichandler.New(),
@@ -57,14 +57,14 @@ func NewWithMSGraphClient(msgraphClient msgraph.Interface) *Handler {
 	}
 }
 
-// getStaticDocuments retrieves documents from static handler
-func (h *Handler) getStaticDocuments(ctx context.Context) (*types.DocumentCollection, error) {
+// extractStaticData retrieves data from static handler
+func (h *Handler) extractStaticData(ctx context.Context) (*types.DocumentCollection, error) {
 	staticClient := static.NewClient()
 	return staticClient.GetAllDataAsJSON(ctx)
 }
 
-// getMsgraphDocuments retrieves documents from msgraph handler
-func (h *Handler) getMsgraphDocuments(ctx context.Context) (*types.DocumentCollection, error) {
+// extractMsgraphData retrieves data from msgraph handler
+func (h *Handler) extractMsgraphData(ctx context.Context) (*types.DocumentCollection, error) {
 	if h.msgraphHandler == nil || !h.msgraphHandler.IsConfigured() {
 		return nil, fmt.Errorf("msgraph handler not configured")
 	}
@@ -72,8 +72,8 @@ func (h *Handler) getMsgraphDocuments(ctx context.Context) (*types.DocumentColle
 	return h.msgraphHandler.GetDocuments(ctx)
 }
 
-// getMsgraphDocumentsWithToken retrieves documents using an access token
-func (h *Handler) getMsgraphDocumentsWithToken(ctx context.Context, token string) (*types.DocumentCollection, error) {
+// extractMsgraphDataWithToken retrieves data using an access token
+func (h *Handler) extractMsgraphDataWithToken(ctx context.Context, token string) (*types.DocumentCollection, error) {
 	tempHandler, err := msgraphhandler.NewWithToken(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create msgraph client with token: %w", err)
@@ -82,20 +82,20 @@ func (h *Handler) getMsgraphDocumentsWithToken(ctx context.Context, token string
 	return tempHandler.GetDocuments(ctx)
 }
 
-// mergeDocuments merges documents from different sources into a single collection
-func (h *Handler) mergeDocuments(staticDocs, msgraphDocs *types.DocumentCollection) *types.DocumentCollection {
-	masterCollection := types.NewDocumentCollection("data_extraction_service")
+// mergeDataCollections merges data from different sources into a single collection
+func (h *Handler) mergeDataCollections(staticData, msgraphData *types.DocumentCollection) *types.DocumentCollection {
+	masterCollection := types.NewDocumentCollection("etl_pipeline")
 
-	// Add static documents
-	if staticDocs != nil {
-		for _, doc := range staticDocs.Documents {
+	// Add static data
+	if staticData != nil {
+		for _, doc := range staticData.Documents {
 			masterCollection.AddDocument(doc)
 		}
 	}
 
-	// Add msgraph documents
-	if msgraphDocs != nil {
-		for _, doc := range msgraphDocs.Documents {
+	// Add msgraph data
+	if msgraphData != nil {
+		for _, doc := range msgraphData.Documents {
 			masterCollection.AddDocument(doc)
 		}
 	}
@@ -103,22 +103,22 @@ func (h *Handler) mergeDocuments(staticDocs, msgraphDocs *types.DocumentCollecti
 	return masterCollection
 }
 
-// GetAllDocuments returns documents from all available sources
-func (h *Handler) GetAllDocuments(c *gin.Context) {
+// ExtractAllData returns data from all available sources
+func (h *Handler) ExtractAllData(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get static documents
-	staticDocs, err := h.getStaticDocuments(ctx)
+	// Extract static data
+	staticData, err := h.extractStaticData(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to retrieve static documents",
+			"error":   "Failed to extract static data",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Get msgraph documents
-	var msgraphDocs *types.DocumentCollection
+	// Extract msgraph data
+	var msgraphData *types.DocumentCollection
 
 	// Check for Authorization header with Bearer token
 	authHeader := c.GetHeader("Authorization")
@@ -126,43 +126,43 @@ func (h *Handler) GetAllDocuments(c *gin.Context) {
 		// Extract token from Authorization header
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 
-		msgraphDocs, err = h.getMsgraphDocumentsWithToken(ctx, token)
+		msgraphData, err = h.extractMsgraphDataWithToken(ctx, token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":   "Failed to retrieve msgraph documents with provided token",
+				"error":   "Failed to extract msgraph data with provided token",
 				"details": err.Error(),
 			})
 			return
 		}
 	} else if h.msgraphHandler != nil && h.msgraphHandler.IsConfigured() {
 		// Use configured msgraph handler
-		msgraphDocs, err = h.getMsgraphDocuments(ctx)
+		msgraphData, err = h.extractMsgraphData(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to retrieve msgraph documents",
+				"error":   "Failed to extract msgraph data",
 				"details": err.Error(),
 			})
 			return
 		}
 	}
 
-	// Merge documents from both sources
-	mergedCollection := h.mergeDocuments(staticDocs, msgraphDocs)
+	// Merge data from both sources
+	mergedCollection := h.mergeDataCollections(staticData, msgraphData)
 
 	c.JSON(http.StatusOK, mergedCollection)
 }
 
-// GetDocumentsBySource returns documents from a specific source
-func (h *Handler) GetDocumentsBySource(c *gin.Context) {
+// ExtractDataBySource returns data from a specific source
+func (h *Handler) ExtractDataBySource(c *gin.Context) {
 	source := c.Param("source")
 	ctx := c.Request.Context()
 
 	switch strings.ToLower(source) {
 	case "static":
-		collection, err := h.getStaticDocuments(ctx)
+		collection, err := h.extractStaticData(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to retrieve static documents",
+				"error":   "Failed to extract static data",
 				"details": err.Error(),
 			})
 			return
@@ -176,10 +176,10 @@ func (h *Handler) GetDocumentsBySource(c *gin.Context) {
 			// Extract token from Authorization header
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 
-			collection, err := h.getMsgraphDocumentsWithToken(ctx, token)
+			collection, err := h.extractMsgraphDataWithToken(ctx, token)
 			if err != nil {
 				c.JSON(http.StatusUnauthorized, gin.H{
-					"error":   "Failed to retrieve msgraph documents with provided token",
+					"error":   "Failed to extract msgraph data with provided token",
 					"details": err.Error(),
 				})
 				return
@@ -197,10 +197,10 @@ func (h *Handler) GetDocumentsBySource(c *gin.Context) {
 			return
 		}
 
-		collection, err := h.getMsgraphDocuments(ctx)
+		collection, err := h.extractMsgraphData(ctx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to retrieve msgraph documents",
+				"error":   "Failed to extract msgraph data",
 				"details": err.Error(),
 			})
 			return
@@ -215,8 +215,8 @@ func (h *Handler) GetDocumentsBySource(c *gin.Context) {
 	}
 }
 
-// GetDocumentsByType returns documents filtered by type from static source
-func (h *Handler) GetDocumentsByType(c *gin.Context) {
+// ExtractDataByType returns data filtered by type from static source
+func (h *Handler) ExtractDataByType(c *gin.Context) {
 	fileType := c.Param("type")
 	ctx := c.Request.Context()
 
@@ -224,13 +224,13 @@ func (h *Handler) GetDocumentsByType(c *gin.Context) {
 	documents, err := staticClient.GetFilesByType(ctx, fileType)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Failed to retrieve documents by type",
+			"error":   "Failed to extract data by type",
 			"details": err.Error(),
 		})
 		return
 	}
 
-	// Create a collection for the filtered documents
+	// Create a collection for the filtered data
 	collection := types.NewDocumentCollection(fmt.Sprintf("static_%s", fileType))
 	for _, doc := range documents {
 		collection.AddDocument(doc)
