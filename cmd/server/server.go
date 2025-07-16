@@ -287,12 +287,10 @@ func createMongoDBClient(cfg *Config) (mongodb.Interface, *mongodb.DocumentServi
 	mongoConfig := mongodb.NewConfig()
 	mongoConfig.MongoDB.URI = cfg.MongoDB.URI
 
+	// All MongoDB configuration must come from environment variables
 	if cfg.MongoDB.Database != "" {
 		mongoConfig.MongoDB.Database = cfg.MongoDB.Database
-	} else {
-		mongoConfig.MongoDB.Database = "data_extraction_service" // Default database name
 	}
-
 	if cfg.MongoDB.Username != "" {
 		mongoConfig.MongoDB.Username = cfg.MongoDB.Username
 	}
@@ -399,16 +397,12 @@ func setCmdFlagsFromEnv(command *cobra.Command, cfg *Config) {
 	cfg.OneNote.MaxContentWorkers = int(env.ParseInt(OneNoteContentWorkersEnvVar, 10)) // Default: 10 workers
 
 	// Set MongoDB configuration from environment variables
+	// No default values - all MongoDB configuration must be explicitly provided
 	cfg.MongoDB.URI = os.Getenv(MongoDBURIEnvVar)
 	cfg.MongoDB.Database = os.Getenv(MongoDBDatabaseEnvVar)
 	cfg.MongoDB.Username = os.Getenv(MongoDBUsernameEnvVar)
 	cfg.MongoDB.Password = os.Getenv(MongoDBPasswordEnvVar)
 	cfg.MongoDB.AuthSource = os.Getenv(MongoDBAuthSourceEnvVar)
-
-	// Set default MongoDB URI if not provided
-	if cfg.MongoDB.URI == "" {
-		cfg.MongoDB.URI = "mongodb://localhost:27017" // Use the default from user's request
-	}
 }
 
 func testStatusCodeAlertHandler(c *gin.Context) {

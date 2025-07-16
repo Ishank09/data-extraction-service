@@ -43,8 +43,11 @@ type Config struct {
 // NewConfig creates a new MongoDB configuration with default values
 func NewConfig() *Config {
 	config := &Config{}
-	config.MongoDB.URI = "mongodb://localhost:27017"
-	config.MongoDB.Database = "test"
+	// MongoDB connection details must be provided via environment variables
+	// config.MongoDB.URI = "" // No default - must be explicitly set
+	// config.MongoDB.Database = "" // No default - must be explicitly set
+
+	// Keep reasonable technical defaults for connection settings
 	config.Connection.Timeout = 10 * time.Second
 	config.Connection.ServerSelectionTimeout = 30 * time.Second
 	config.Connection.MaxPoolSize = 100

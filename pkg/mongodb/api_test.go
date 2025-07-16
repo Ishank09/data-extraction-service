@@ -113,12 +113,14 @@ func TestConfigDefaults(t *testing.T) {
 	}()
 
 	config := NewConfig()
-	if config.MongoDB.URI != "mongodb://localhost:27017" {
-		t.Errorf("Expected default URI 'mongodb://localhost:27017', got '%s'", config.MongoDB.URI)
+	// URI and Database should not have defaults - must be explicitly set
+	if config.MongoDB.URI != "" {
+		t.Errorf("Expected no default URI, got '%s'", config.MongoDB.URI)
 	}
-	if config.MongoDB.Database != "test" {
-		t.Errorf("Expected default Database 'test', got '%s'", config.MongoDB.Database)
+	if config.MongoDB.Database != "" {
+		t.Errorf("Expected no default Database, got '%s'", config.MongoDB.Database)
 	}
+	// Technical defaults should still be set
 	if config.Security.AuthSource != "admin" {
 		t.Errorf("Expected default AuthSource 'admin', got '%s'", config.Security.AuthSource)
 	}

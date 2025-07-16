@@ -210,11 +210,13 @@ All documents are transformed into a unified schema and automatically stored in 
 #### MongoDB Configuration
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `MONGODB_URI` | No | mongodb://localhost:27017 | MongoDB connection URI |
-| `MONGODB_DATABASE` | No | data_extraction_service | Database name |
+| `MONGODB_URI` | **Yes** | *None* | MongoDB connection URI |
+| `MONGODB_DATABASE` | **Yes** | *None* | Database name |
 | `MONGODB_USERNAME` | No | - | MongoDB username |
 | `MONGODB_PASSWORD` | No | - | MongoDB password |
 | `MONGODB_AUTH_SOURCE` | No | admin | Authentication database |
+
+> ⚠️ **Note**: MongoDB integration is optional. If `MONGODB_URI` is not provided, the service will run without document storage.
 
 #### Performance Tuning
 | Variable | Required | Default | Description |
